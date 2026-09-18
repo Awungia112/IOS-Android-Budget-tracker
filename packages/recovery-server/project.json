@@ -1,0 +1,54 @@
+{
+  "name": "recovery-server",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/recovery-server/src",
+  "projectType": "application",
+  "tags": [
+    "scope:recovery",
+    "type:app"
+  ],
+  "targets": {
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "unset NO_COLOR; pnpm --filter @budget/recovery-server run dev",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": [
+        "{projectRoot}/dist"
+      ],
+      "dependsOn": [
+        "^build"
+      ],
+      "options": {
+        "command": "unset NO_COLOR; pnpm --filter @budget/recovery-server run build",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "unset NO_COLOR; pnpm --filter @budget/recovery-server run lint",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["^build"],
+      "options": {
+        "command": "unset NO_COLOR; pnpm --filter @budget/recovery-server run typecheck",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "unset NO_COLOR; pnpm --filter @budget/recovery-server run test",
+        "cwd": "{workspaceRoot}"
+      }
+    }
+  }
+}

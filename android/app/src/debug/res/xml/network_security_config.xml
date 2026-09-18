@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    DEBUG-ONLY network security config.
+
+    AGP merges src/debug/res over src/main/res for the debug build type only, so
+    this file replaces the strict release config (src/main/res/xml) in debug
+    builds and never ships in a release AAB/APK.
+
+    Cleartext (HTTP) is permitted ONLY for the local dev backend and the dev
+    environment host; every other host still follows Android's secure default
+    (HTTPS required). User CAs are trusted for these dev domains only, to allow
+    proxy tools (Charles / mitmproxy) during local development.
+
+      - 127.0.0.1 / localhost : local auth backend (http://127.0.0.1:3095)
+      - 10.0.2.2              : the emulator's alias for the host loopback
+      - app.dev.dip.on.adorsys.com : shared dev environment
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">app.dev.dip.on.adorsys.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

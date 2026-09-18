@@ -1,0 +1,32 @@
+{
+  "name": "@budget/shared",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./sync-limits": {
+      "import": "./dist/sync-limits.js",
+      "types": "./dist/sync-limits.d.ts"
+    },
+    "./session-token": {
+      "import": "./dist/session-token.js",
+      "types": "./dist/session-token.d.ts"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "session-token": ["dist/session-token.d.ts"],
+      "sync-limits": ["dist/sync-limits.d.ts"]
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "UNLICENSED"
+}

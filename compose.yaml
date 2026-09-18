@@ -1,0 +1,138 @@
+name: budget-wise-online
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: budget
+      POSTGRES_USER: budget
+      POSTGRES_PASSWORD: budget
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - budget_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U budget -d budget"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  recovery-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: budget_recovery
+      POSTGRES_USER: budget_recovery
+      POSTGRES_PASSWORD: budget_recovery
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - budget_recovery_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U budget_recovery -d budget_recovery"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  server-migrate:
+    profiles: ["server"]
+    build:
+      context: .
+      dockerfile: packages/server/Dockerfile
+      target: build
+    environment:
+      DATABASE_URL: postgresql://budget:budget@postgres:5432/budget
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["pnpm", "--filter", "@budget/server", "run", "db:migrate"]
+    restart: "no"
+
+  server:
+    profiles: ["server"]
+    build:
+      context: .
+      dockerfile: packages/server/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://budget:budget@postgres:5432/budget
+      MAGIC_LINK_SECRET: ${MAGIC_LINK_SECRET:-replace-with-local-dev-secret}
+      RECOVERY_JWT_SECRET: ${RECOVERY_JWT_SECRET:-replace-with-local-dev-secret}
+      RECOVERY_SERVER_URL: http://recovery-server:3001
+      BUDGET_WISE_PEPPER: ${BUDGET_WISE_PEPPER:-dev-pepper}
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL:-}
+      BREVO_SENDER_NAME: ${BREVO_SENDER_NAME:-Mein Budget}
+      MAGIC_LINK_TEMPLATE_ID: ${MAGIC_LINK_TEMPLATE_ID:-}
+      INVITE_TEMPLATE_ID: ${INVITE_TEMPLATE_ID:-}
+      AUTH_DEEP_LINK_BASE: ${AUTH_DEEP_LINK_BASE:-http://localhost:3095/register/verify}
+      EMAIL_ENCRYPTION_KEY: ${EMAIL_ENCRYPTION_KEY:-}
+      HOST: 0.0.0.0
+      PORT: 3000
+      NODE_ENV: development
+    ports:
+      - "3095:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      server-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  recovery-migrate:
+    profiles: ["recovery"]
+    build:
+      context: .
+      dockerfile: packages/recovery-server/Dockerfile
+      target: build
+    environment:
+      RECOVERY_DB_URL: postgresql://budget_recovery:budget_recovery@recovery-postgres:5432/budget_recovery
+    depends_on:
+      recovery-postgres:
+        condition: service_healthy
+    command: ["pnpm", "--filter", "@budget/recovery-server", "run", "db:migrate"]
+    restart: "no"
+
+  recovery-server:
+    profiles: ["recovery"]
+    build:
+      context: .
+      dockerfile: packages/recovery-server/Dockerfile
+    environment:
+      RECOVERY_DB_URL: postgresql://budget_recovery:budget_recovery@recovery-postgres:5432/budget_recovery
+      RECOVERY_JWT_SECRET: ${RECOVERY_JWT_SECRET:-replace-with-local-dev-secret}
+      RECOVERY_EMAIL_PEPPER: ${RECOVERY_EMAIL_PEPPER:-dev-pepper}
+      BREVO_API_KEY: ${BREVO_API_KEY:-replace-with-brevo-transactional-api-key}
+      BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL:-}
+      BREVO_SENDER_NAME: ${BREVO_SENDER_NAME:-Mein Budget}
+      # RECOVERY_EMAIL_TEMPLATE_ID — unset to use the inline HTML builder (supports i18n).
+      # Set to a Brevo template ID only if the template handles language switching itself.
+      RECOVERY_EMAIL_TEMPLATE_ID: ${RECOVERY_EMAIL_TEMPLATE_ID:-}
+      RECOVERY_DEBUG: ${RECOVERY_DEBUG:-false}
+      HOST: 0.0.0.0
+      PORT: 3001
+      NODE_ENV: development
+    ports:
+      - "127.0.0.1:3096:3001"
+    depends_on:
+      recovery-postgres:
+        condition: service_healthy
+      recovery-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  adminer:
+    profiles: ["tools"]
+    image: adminer:4-standalone
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      recovery-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  budget_postgres_data:
+  budget_recovery_postgres_data:

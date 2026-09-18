@@ -1,0 +1,6 @@
+# Compiled TypeScript outputs (tsc emits these in-place when outDir not set)
+# These belong in dist/ only — never commit them from src/
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
+src/**/*.d.ts.map

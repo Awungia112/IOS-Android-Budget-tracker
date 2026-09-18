@@ -1,0 +1,118 @@
+:imagesdir: images
+
+[[section-system-scope-and-context]]
+== System Scope and Context
+
+This section describes the environment and context of the Budget Wise PWA, including all external systems and actors it interacts with.
+
+=== Business Context
+
+image::L00_Business_Context.png[Business Context Diagram, title="Business Context Diagram", align="center"]
+
+|===
+| System | Description
+
+| User
+| End user (adolescents, young adults, families) who interacts with the PWA to manage their personal finances, track income/expenses, and monitor budgets.
+
+| Budget Wise PWA
+| The progressive web application providing budget management functionality. Runs entirely in the browser with offline support.
+
+| Browser Storage
+| Local storage mechanism (IndexedDB) where all user data is persisted. Ensures privacy by keeping data on the user's device.
+
+| Service Worker
+| Background process that enables offline functionality, caches app assets, and handles PWA installation.
+
+| Cloudflare Pages
+| Hosting platform that serves the PWA globally via CDN. Provides SSL, caching, and edge delivery.
+
+| GitLab CI/CD
+| Continuous integration and deployment pipeline that builds and deploys the application to Cloudflare Pages.
+|===
+
+==== Phase 2 - Future External Systems
+
+|===
+| System | Description | Status
+
+| PSD2/XS2A Provider
+| Third-party service (e.g., Tink, Finleap Connect) that provides secure access to user bank accounts via OpenBanking APIs.
+| Planned
+
+| AI Service
+| External AI provider (e.g., OpenAI, Claude API) for intelligent financial insights, automated categorization, and personalized recommendations.
+| Planned
+
+| Backend API
+| Future backend service to handle PSD2 integration, user authentication, and data synchronization for shared accounts.
+| Planned
+|===
+
+=== Technical Context
+
+image::L00_Technical_Context-Budget.png[Technical Context Diagram, title="Technical Context Diagram", align="center"]
+
+|===
+| Interface | Technology | Description
+
+| User Interface
+| React + Tailwind CSS
+| Modern, responsive UI built with React components and Tailwind styling
+
+| State Management
+| React Context API
+| Application state managed through React contexts (BudgetContext, AccountContext, ThemeContext)
+
+| Data Persistence
+| IndexedDB
+| Browser-native database for storing all user data locally (7 object stores)
+
+| Offline Support
+| Service Worker (Workbox)
+| Caches app shell and assets for offline functionality via vite-plugin-pwa
+
+| Hosting
+| Cloudflare Pages
+| Static site hosting with global CDN distribution
+
+| CI/CD
+| GitLab CI/CD + Wrangler
+| Automated build and deployment pipeline
+
+| Charts
+| Recharts
+| Data visualization library for statistics and reports
+
+| i18n
+| react-i18next
+| Internationalization supporting German and English languages
+|===
+
+==== Data Flow
+
+image::Frontend_Architecture.png[Frontend Architecture, title="Frontend Architecture", align="center"]
+
+==== Deployment Flow
+
+image::Phase1_Deployment_Architecture.png[Deployment Architecture, title="Deployment Architecture", align="center"]
+
+=== Boundaries
+
+==== What is INSIDE the system scope
+
+* User interface (pages, components)
+* State management (contexts, hooks)
+* Business logic (services)
+* Data access (repositories)
+* Local data storage (IndexedDB)
+* Offline caching (Service Worker)
+
+==== What is OUTSIDE the system scope (Phase 1)
+
+* User authentication/authorization
+* Backend server
+* Cloud database
+* Bank account integration (PSD2)
+* AI/ML services
+* Push notifications

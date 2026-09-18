@@ -1,0 +1,254 @@
+= Online Accounts Server Testing Runbook
+
+This runbook covers end-to-end local testing for the `@budget/server` auth
+registration and magic-link verification flow introduced in ticket #265.
+
+For the general server foundation (health, nonce, `/users`), see
+`docs/online-accounts/backend-foundation-runbook.adoc`.
+
+== Prerequisites
+
+- Docker with Docker Compose
+- A Brevo account with a transactional email template configured
+- Node 22+ and pnpm installed
+
+== Environment Setup
+
+Copy the example env file and fill in the required values:
+
+[source,bash]
+----
+cp packages/server/.env.example packages/server/.env
+----
+
+Edit `packages/server/.env`:
+
+[source,dotenv]
+----
+DATABASE_URL=postgresql://budget:budget@localhost:55432/budget
+MAGIC_LINK_SECRET=replace-with-local-dev-secret
+BREVO_API_KEY=replace-with-brevo-transactional-api-key
+BREVO_SENDER_EMAIL=noreply@example.com
+BREVO_SENDER_NAME=Budget Wise
+MAGIC_LINK_TEMPLATE_ID=
+AUTH_DEEP_LINK_BASE=http://localhost:8080/register/verify
+HOST=127.0.0.1
+PORT=3095
+NODE_ENV=development
+----
+
+NOTE: `BREVO_API_KEY` is only required when testing real email delivery.
+Unit and integration tests mock Brevo — no key needed for `pnpm test`.
+
+NOTE: Brevo requires your outbound IP to be whitelisted before it will
+accept API calls. Add your IP at https://app.brevo.com/security/authorised_ips
+if you get a 401 from Brevo during manual testing.
+
+== Brevo Email Setup
+
+The register endpoint sends email via Brevo when `BREVO_API_KEY` is set.
+If `MAGIC_LINK_TEMPLATE_ID` is empty, the server sends built-in HTML/text
+email content using `BREVO_SENDER_EMAIL` and `BREVO_SENDER_NAME`.
+
+If you prefer a Brevo transactional template, set `MAGIC_LINK_TEMPLATE_ID`.
+The template must include these two variables:
+
+- `{{ params.magic_link }}` — the deep-link URL containing the JWT
+- `{{ params.code }}` — the 6-digit manual fallback code
+
+Create the template at https://app.brevo.com/templates/email/create and note
+the template ID shown in the URL (`/email/edit/<ID>`). Set that as
+`MAGIC_LINK_TEMPLATE_ID` in your `.env`.
+
+== Start Local Databases
+
+[source,bash]
+----
+pnpm stack:db
+----
+
+== Run Migrations
+
+[source,bash]
+----
+pnpm db:migrate:server:local
+----
+
+This applies the committed main backend Drizzle migrations, including:
+
+- `0001_users.sql` — users table with constraints and partial index
+- `0002_magic_link_used_at.sql` — single-use token enforcement column
+- `0003_sync_account_tables.sql` and later account/sync/sharing migrations
+
+== Start the Server
+
+[source,bash]
+----
+# Load from .env file
+set -a && source packages/server/.env && set +a
+pnpm dev:server
+----
+
+Or inline:
+
+[source,bash]
+----
+DATABASE_URL=postgresql://budget:budget@localhost:55432/budget \
+MAGIC_LINK_SECRET=local-dev-secret \
+BREVO_API_KEY=<your-key> \
+BREVO_SENDER_EMAIL=noreply@example.com \
+BREVO_SENDER_NAME="Budget Wise" \
+AUTH_DEEP_LINK_BASE=http://localhost:8080/register/verify \
+HOST=127.0.0.1 \
+PORT=3095 \
+pnpm dev:server
+----
+
+Expected startup output:
+
+[source]
+----
+{"msg":"Server listening at http://127.0.0.1:3095"}
+{"deleted":0,"msg":"cleanup-unvalidated-registrations: done"}
+----
+
+== Automated Tests
+
+Run the full server test suite (no env vars required — all external deps are mocked):
+
+[source,bash]
+----
+pnpm --filter @budget/server test
+----
+
+Expected: 36 tests passing across `src/app.test.ts` and `src/routes/auth.test.ts`.
+
+== Manual End-to-End Test
+
+=== 1. Health check
+
+[source,bash]
+----
+curl http://127.0.0.1:3095/health
+----
+
+Expected:
+
+[source,json]
+----
+{"status":"ok","service":"budget-wise-server","version":"3.7.0","timestamp":"..."}
+----
+
+=== 2. Register — sends magic-link email
+
+[source,bash]
+----
+NONCE=$(curl -s http://127.0.0.1:3095/v1/nonce | \
+  python3 -c "import sys,json; print(json.load(sys.stdin)['nonce'])")
+TIMESTAMP=$(date +%s%3N)
+
+curl -s -X POST http://127.0.0.1:3095/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -H "X-Nonce: $NONCE" \
+  -H "X-Timestamp: $TIMESTAMP" \
+  -d '{
+    "email_hash": "'$(printf 'a%.0s' {1..64})'",
+    "public_key": "'$(printf 'A%.0s' {1..43})'",
+    "email": "your-email@example.com"
+  }'
+----
+
+Expected: `{"success":true,"message":"Magic link sent"}`
+
+Check your inbox for the magic-link email. The link will look like:
+
+[source]
+----
+http://127.0.0.1:3095/v1/auth/verify?token=<JWT>
+----
+
+=== 3. Verify — consume the token and get a session JWT
+
+Copy the token from the email URL and run:
+
+[source,bash]
+----
+curl -s "http://127.0.0.1:3095/v1/auth/verify?token=<TOKEN>"
+----
+
+Expected:
+
+[source,json]
+----
+{"token":"<7-day-session-jwt>","user":{"email_hash":"aaa...aaa"}}
+----
+
+=== 4. Confirm DB state
+
+[source,bash]
+----
+docker compose exec postgres psql -U budget -d budget \
+  -c "SELECT id, LEFT(email_hash,8) AS hash_prefix, validated_at,
+             magic_link_used_at, created_at FROM users;"
+----
+
+After step 2: `validated_at` and `magic_link_used_at` are `NULL`.
+After step 3: both columns are set to the verification timestamp.
+
+=== 5. Replay protection — second verify attempt
+
+Re-run the verify curl from step 3 with the same token:
+
+[source,bash]
+----
+curl -s "http://127.0.0.1:3095/v1/auth/verify?token=<SAME_TOKEN>"
+----
+
+Expected: `{"error":"token_already_used"}`
+
+== Error Reference
+
+[cols="1,3"]
+|===
+| Error | Meaning
+
+| `invalid_nonce`
+| Nonce missing, unknown, expired, or already used. Fetch a fresh nonce from `GET /v1/nonce`.
+
+| `timestamp_out_of_range`
+| `X-Timestamp` is more than 60 seconds from server time.
+
+| `invalid_public_key`
+| `public_key` does not match the 43-char base64url pattern.
+
+| `already_validated`
+| The email hash is already associated with a validated account.
+
+| `registration_failed`
+| Unexpected server error during registration. Check server logs.
+
+| `token_expired`
+| The magic-link JWT has passed its 24-hour expiry.
+
+| `invalid_token`
+| The JWT signature is invalid or the token is malformed.
+
+| `token_invalid_for_current_key`
+| The token was issued for a different `public_key` than the one currently on the account (stale link after re-registration).
+
+| `token_already_used`
+| The magic link has already been consumed. Request a new one via `POST /v1/auth/register`.
+
+| `user_not_found`
+| No user row exists for the email hash in the token. Should not occur in normal flow.
+
+| `internal_error`
+| Unexpected server error during verification. Check server logs.
+|===
+
+== Cleanup
+
+[source,bash]
+----
+pnpm stack:down
+----

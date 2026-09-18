@@ -1,0 +1,17 @@
+{
+  "name": "My Budget - Expenses under control",
+  "short_name": "My Budget",
+  "description": "Die kostenlose App zur Übersicht Ihrer Finanzen",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#1E90FF",
+  "icons": [
+    {
+      "src": "/assets/logo-deutshland.png",
+      "sizes": "200x200",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

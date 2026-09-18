@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+
+# Pre-commit hook: secret detection via Gitleaks
+#
+# Scans staged changes for secrets before they enter the repository.
+# Gitleaks must be installed -- commits are blocked until it is available.
+#
+# Install Gitleaks:
+#   macOS:  brew install gitleaks
+#   Linux:  https://github.com/gitleaks/gitleaks/releases
+
+if ! command -v gitleaks > /dev/null 2>&1; then
+  echo ""
+  echo "ERROR: gitleaks is not installed -- commit blocked."
+  echo "Install it before committing:"
+  echo "  macOS: brew install gitleaks"
+  echo "  Other: https://github.com/gitleaks/gitleaks/releases"
+  echo ""
+  exit 1
+fi
+
+gitleaks protect --staged --verbose

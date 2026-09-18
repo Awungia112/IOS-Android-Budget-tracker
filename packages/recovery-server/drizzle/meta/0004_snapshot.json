@@ -1,0 +1,54 @@
+{
+  "id": "c8d53344-9d06-5f34-de3c-bg4f2e5e7c90",
+  "prevId": "b7c42f33-8c95-4e23-cd2b-af3f1e4d6b89",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.recovery_entries": {
+      "name": "recovery_entries",
+      "schema": "",
+      "columns": {
+        "id": { "name": "id", "type": "uuid", "primaryKey": true, "notNull": true, "default": "gen_random_uuid()" },
+        "email_hash": { "name": "email_hash", "type": "text", "primaryKey": false, "notNull": true },
+        "encrypted_private_key": { "name": "encrypted_private_key", "type": "jsonb", "primaryKey": false, "notNull": true },
+        "tmp_code_hash": { "name": "tmp_code_hash", "type": "text", "primaryKey": false, "notNull": false },
+        "code_expires_at": { "name": "code_expires_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": false },
+        "code_used_at": { "name": "code_used_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": false },
+        "enrolled_at": { "name": "enrolled_at", "type": "timestamp with time zone", "primaryKey": false, "notNull": true, "default": "now()" },
+        "verify_attempts": { "name": "verify_attempts", "type": "integer", "primaryKey": false, "notNull": true, "default": 0 },
+        "verify_window_start": { "name": "verify_window_start", "type": "timestamp with time zone", "primaryKey": false, "notNull": false },
+        "request_count": { "name": "request_count", "type": "integer", "primaryKey": false, "notNull": true, "default": 0 },
+        "request_window_start": { "name": "request_window_start", "type": "timestamp with time zone", "primaryKey": false, "notNull": false }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "recovery_entries_email_hash_unique": {
+          "name": "recovery_entries_email_hash_unique",
+          "nullsNotDistinct": false,
+          "columns": ["email_hash"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "code_expires_at_after_enrolled_at": {
+          "name": "code_expires_at_after_enrolled_at",
+          "value": "\"recovery_entries\".\"code_expires_at\" IS NULL OR \"recovery_entries\".\"code_expires_at\" > \"recovery_entries\".\"enrolled_at\""
+        },
+        "tmp_code_hash_is_argon2id": {
+          "name": "tmp_code_hash_is_argon2id",
+          "value": "\"recovery_entries\".\"tmp_code_hash\" IS NULL OR \"recovery_entries\".\"tmp_code_hash\" LIKE '$argon2id$%'"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": { "columns": {}, "schemas": {}, "tables": {} }
+}

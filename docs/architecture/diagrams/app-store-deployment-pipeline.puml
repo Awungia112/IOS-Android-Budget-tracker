@@ -1,0 +1,57 @@
+@startuml pwa-deployment-pipeline
+
+top to bottom direction
+
+title Mobile App Deployment Pipeline
+
+actor Developer
+
+package "Internal GitLab (git.adorsys.de)" {
+    [CI/CD Pipeline]
+}
+
+Developer --> [CI/CD Pipeline]: git tag v*.*.*
+
+package "Build Stage (Linux Runner)" {
+    [pnpm build]
+}
+
+[CI/CD Pipeline] --> [pnpm build]: triggers
+
+database "dist/" as dist
+[pnpm build] --> dist
+
+package "Android (Linux Runner)" {
+    [Capacitor + Gradle]
+    [Fastlane supply]
+}
+
+package "iOS (Local Mac Runner)" {
+    [Capacitor + Xcode]
+    [Fastlane gym]
+    [Fastlane pilot]
+}
+
+dist --> [Capacitor + Gradle]: cap sync
+dist --> [Capacitor + Xcode]: cap sync
+
+[Capacitor + Gradle] --> [Fastlane supply]: .apk / .aab
+[Capacitor + Xcode] --> [Fastlane gym]
+[Fastlane gym] --> [Fastlane pilot]: .ipa
+
+cloud "Google Play" as playstore
+cloud "App Store" as appstore
+
+[Fastlane supply] --> playstore
+[Fastlane pilot] --> appstore
+
+note right of "iOS (Local Mac Runner)"
+  GDPR Compliant
+  On-Premise
+end note
+
+note right of "Android (Linux Runner)"
+  Free Shared Runner
+end note
+
+@enduml

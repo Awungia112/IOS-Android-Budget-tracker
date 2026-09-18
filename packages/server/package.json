@@ -1,0 +1,39 @@
+{
+  "name": "@budget/server",
+  "version": "3.7.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "lint": "eslint src drizzle.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --config vitest.config.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node -e \"if (!process.env.DATABASE_URL) { console.error('DATABASE_URL must be set to run Drizzle migrations'); process.exit(1) }\" && drizzle-kit migrate --config=drizzle.config.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "@fastify/jwt": "^10.1.0",
+    "@fastify/rate-limit": "^10.2.2",
+    "@getbrevo/brevo": "^5.0.0",
+    "@sinclair/typebox": "^0.34.49",
+    "argon2": "^0.44.0",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "^5.8.5",
+    "pg": "^8.21.0",
+    "@budget/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@budget/core": "workspace:*",
+    "@types/node": "^22.5.5",
+    "@types/pg": "^8.20.0",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.22.3",
+    "typescript": "^5.5.3",
+    "vitest": "^2.1.3"
+  }
+}

@@ -1,0 +1,4 @@
+# Cloudflare Pages Configuration
+name = "budget-wise-pwa"
+compatibility_date = "2025-12-10"
+pages_build_output_dir = "dist"

@@ -1,0 +1,324 @@
+:imagesdir: images
+
+[[section-building-block-view]]
+
+== Building Block View
+
+This section describes the decomposition of the Budget Wise PWA into building blocks (modules, components, packages) and their dependencies.
+
+=== Whitebox Overall System (Level 1)
+
+image::L01_Whitebox_Overall.png[Whitebox Overall System Level 1, 80%, title="Whitebox Overall System Level 1", align="center"]
+
+Motivation::
+The Budget Wise PWA is structured as an Nx monorepo with two main packages that separate presentation concerns from data concerns. This separation enables independent development, testing, and potential reuse of the core data layer in other applications.
+
+Contained Building Blocks::
+|===
+| Component | Description
+
+| @budget/app
+| Presentation layer package containing React components, pages, hooks, and state management (contexts). Responsible for rendering the user interface and handling user interactions.
+
+| @budget/core
+| Data layer package containing types, services, repositories, and database connection management. Has zero React dependencies and can be reused in other applications.
+
+| Browser Storage
+| Browser-native IndexedDB database that persists all business data (transactions, categories, accounts) locally on the device.
+
+| Service Worker
+| Infrastructure layer that uses Cache Storage API to cache application assets (HTML, CSS, JS, images) and enable offline functionality. Does NOT store business data.
+|===
+
+Important Interfaces::
+|===
+| Interface | Description
+
+| Core API
+| Public exports from `@budget/core` package. Provides types, services, and repositories for data operations.
+
+| State API
+| React Context API interfaces exposed by `@budget/app` for state management (BudgetContext, AccountContext, ThemeContext).
+
+| IndexedDB API
+| Browser-native API for data persistence, accessed through the Connection Manager.
+|===
+
+External Systems::
+|===
+| Component | Description
+
+| User
+| End user interacting with the PWA through a web browser or installed PWA.
+
+| Cloudflare Pages
+| Hosting platform serving the PWA globally via CDN.
+
+| GitLab CI/CD
+| Continuous integration and deployment pipeline.
+|===
+
+=== Level 2: @budget/app (Presentation Layer)
+
+image::L02_Budget_App.png[Budget App Package Level 2, 80%, title="@budget/app Package Level 2", align="center"]
+
+Motivation::
+The presentation layer is organized into logical groupings based on responsibility: pages for routing, components for reusable UI, hooks for shared logic, and contexts for state management.
+
+Contained Building Blocks::
+|===
+| Component | Description
+
+| Pages
+| Route-level components representing each screen of the application (Index, Statistics, Categories, Limits, Templates, Settings, etc.).
+
+| Components
+| Reusable UI components including shadcn/ui primitives, common components (TransactionForm, TransactionItem), and layout components (Layout, Sidebar).
+
+| Hooks
+| Custom React hooks encapsulating reusable logic (useTransactions, useStatistics, useLimits).
+
+| Contexts
+| React Context providers managing application state (BudgetContext, AccountContext, ThemeContext).
+
+| i18n
+| Internationalization configuration and translation files for German and English languages.
+
+| lib
+| Utility functions and helpers (formatters, date utilities).
+|===
+
+==== Pages
+
+|===
+| Page | Description
+
+| Index
+| Main dashboard displaying transaction list, balance summary, and quick-add buttons.
+
+| Statistics
+| Charts and visualizations showing income/expense trends, category breakdowns.
+
+| Categories
+| Management of income and expense categories.
+
+| Limits
+| Setting and monitoring spending limits per category.
+
+| Templates
+| Creating and managing transaction templates for quick entry.
+
+| RecurringItems
+| Managing recurring transactions (daily, weekly, monthly).
+
+| SavingsGoals
+| Setting and tracking savings targets.
+
+| Settings
+| Application settings, data export/import, app reset.
+
+| Onboarding
+| First-time user setup flow.
+|===
+
+==== Contexts
+
+|===
+| Context | Description
+
+| BudgetContext
+| Main state management context handling transactions, categories, limits, templates, recurring items, and savings goals. Interfaces with @budget/core services.
+
+| AccountContext
+| Manages multi-account functionality, account switching, and profile data.
+
+| ThemeContext
+| Handles light/dark/system theme preferences.
+|===
+
+=== Level 2: @budget/core (Data Layer)
+
+image::L02_Budget_Core.png[Budget Core Package Level 2, 80%, title="@budget/core Package Level 2", align="center"]
+
+Motivation::
+The data layer is organized following clean architecture principles with clear separation between types (models), services (business logic), repositories (data access), and database management.
+
+Contained Building Blocks::
+|===
+| Component | Description
+
+| Types
+| TypeScript interfaces and type definitions for all domain entities (Transaction, Category, Account, Limit, Template, RecurringItem, SavingsGoal).
+
+| Services
+| Business logic layer containing validation, calculations, and orchestration (TransactionService, StatisticsService, LimitService, ExportService).
+
+| Repositories
+| Data access layer implementing CRUD operations for each entity type, extending a generic BaseRepository.
+
+| Connection Manager
+| Singleton managing the IndexedDB connection, handling connection lifecycle and reconnection.
+
+| DB Config
+| Database configuration constants (DB_NAME, DB_VERSION, STORE_NAMES, default data).
+|===
+
+==== Types
+
+|===
+| Type | Description
+
+| Transaction
+| Income or expense record with amount, category, date, and title.
+
+| Category
+| Classification for transactions (income or expense type).
+
+| Account
+| User profile with name, initials, and optional email/image.
+
+| Limit
+| Spending limit associated with a category.
+
+| Template
+| Reusable transaction template for quick entry.
+
+| RecurringItem
+| Definition for automatically generated recurring transactions.
+
+| SavingsGoal
+| Savings target with name, amount, and deadline.
+|===
+
+==== Repositories
+
+|===
+| Repository | Description
+
+| BaseRepository<T>
+| Generic repository providing getAll, getById, create, update, delete operations.
+
+| TransactionRepository
+| Transaction-specific queries (getByAccountId, getByDateRange, getByCategory).
+
+| CategoryRepository
+| Category queries (getByAccountId, getByType).
+
+| AccountRepository
+| Account management operations.
+
+| LimitRepository
+| Limit queries (getByAccountId, getByCategoryId).
+
+| TemplateRepository
+| Template queries (getByAccountId).
+
+| RecurringRepository
+| Recurring item queries (getByAccountId, getDueItems).
+
+| SavingsRepository
+| Savings goal queries (getByAccountId).
+|===
+
+==== Services
+
+|===
+| Service | Description
+
+| BudgetService
+| *Facade for all write operations.* The only public write API exported from `@budget/core`. Builds typed command objects, applies them locally via repositories, and appends them to the ChangeLog. See design decision: _Command-Based Change Capture_.
+
+| TransactionService
+| Transaction creation, validation, and retrieval with business rules.
+
+| StatisticsService
+| Calculations for totals, averages, category breakdowns, and savings rates.
+
+| LimitService
+| Limit checking, status calculation, and warning generation.
+
+| RecurringService
+| Processing recurring items and generating transactions.
+
+| ExportService
+| Data export to JSON and import with validation.
+|===
+
+==== Commands & ChangeLog (Phase 2 Readiness)
+
+|===
+| Component | Description
+
+| Command Types (`commands/types.ts`)
+| TypeScript discriminated union defining all 22 write operations as serializable data objects. Each command captures user intent (e.g., `CREATE_TRANSACTION`, `DELETE_ACCOUNT`).
+
+| ChangeLog (`changelog/change-log.ts`)
+| Append-only log backed by an IndexedDB `changeRecords` table. Every command executed through `BudgetService` is recorded here. Serves as the sync boundary for Phase 2 (encrypted push to server).
+
+| ChangeRecord
+| Individual log entry containing the command, timestamp, account ID, and sync status.
+|===
+
+=== Level 2: Browser Storage
+
+Motivation::
+Browser Storage in this architecture refers specifically to persistent business data storage using IndexedDB. This is separate from infrastructure-level caching handled by the Service Worker.
+
+|===
+| Component | Description
+
+| IndexedDB (BudgetWiseDB)
+| Browser-native database containing 7 object stores for all business data (transactions, categories, accounts, limits, templates, recurring items, savings goals). Accessed through the Connection Manager singleton.
+
+| LocalStorage
+| Used minimally for theme preference persistence only.
+|===
+
+=== Level 2: Service Worker (Infrastructure)
+
+Motivation::
+The Service Worker operates as infrastructure separate from business data storage, providing offline-first capabilities by caching application assets.
+
+|===
+| Component | Description
+
+| Service Worker
+| Background process that intercepts network requests and serves cached assets when offline. Uses the Cache Storage API (NOT IndexedDB) to cache HTML, CSS, JavaScript, and images.
+
+| Cache Storage API
+| Browser-native API (accessed via `caches` object) for storing and retrieving HTTP responses. Completely separate from IndexedDB.
+|===
+
+==== IndexedDB Object Stores
+
+|===
+| Store | Key | Description
+
+| accounts
+| id
+| User account profiles
+
+| transactions
+| id
+| Income and expense records
+
+| categories
+| id
+| Transaction categories
+
+| limits
+| id
+| Spending limits
+
+| templates
+| id
+| Transaction templates
+
+| recurringItems
+| id
+| Recurring transaction definitions
+
+| savingsGoals
+| id
+| Savings targets
+|===

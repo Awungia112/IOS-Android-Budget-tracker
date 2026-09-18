@@ -1,0 +1,315 @@
+= Online Accounts Backend Foundation Runbook
+
+This runbook covers the initial `@budget/server` foundation for online accounts. It intentionally stops before auth, sync, sharing, recovery, production schemas, and real environment provisioning.
+
+For the current end-to-end local testing contract, including PostgreSQL smoke,
+replay protection, and auth registration checks, use
+`docs/online-accounts/server-testing-runbook.adoc`.
+
+== Workspace
+
+- Package: `@budget/server`
+- Path: `packages/server`
+- Framework: Fastify on Node 22+
+- Database tooling: PostgreSQL with Drizzle ORM and Drizzle Kit
+- Current public endpoints: `GET /health`, `GET /v1/nonce`, `POST /users`
+
+== Code Layout
+
+[source,text]
+----
+packages/server/
+  src/
+    app.ts              # Fastify app composition and route registration
+    main.ts             # process entrypoint
+    config/env.ts       # environment parsing
+    db/                 # PostgreSQL/Drizzle foundation
+    routes/health.ts    # health endpoint
+    routes/users.ts     # user registration endpoint
+    jobs/cleanup.ts     # hourly cleanup job for unvalidated registrations
+    security/           # replay-protection middleware and nonce issuing
+  drizzle/
+    0001_users.sql      # users table migration
+    meta/_journal.json  # Drizzle migration journal
+----
+
+== Local Commands
+
+From the repository root:
+
+[source,bash]
+----
+pnpm install
+----
+
+Start the local backend databases:
+
+[source,bash]
+----
+pnpm stack:db
+----
+
+Apply migrations and start the server from the host:
+
+[source,bash]
+----
+pnpm db:migrate:server:local
+set -a && source packages/server/.env && set +a
+pnpm dev:server
+----
+
+Smoke test:
+
+[source,bash]
+----
+curl http://127.0.0.1:3095/health
+curl -s -X POST http://127.0.0.1:3095/users \
+  -H 'Content-Type: application/json' \
+  -d '{"emailHash":"'$(printf 'a%.0s' {1..64})'","publicKey":"'$(printf 'A%.0s' {1..43})'"}'
+----
+
+For the full local stack, including recovery database, optional backend
+containers, and Adminer, see `docs/online-accounts/local-dev-stack.md`.
+
+Focused server checks:
+
+[source,bash]
+----
+pnpm nx test server
+pnpm nx build server
+pnpm nx run server:typecheck
+pnpm nx run server:lint
+----
+
+Full monorepo checks:
+
+[source,bash]
+----
+pnpm lint
+pnpm typecheck
+CI=true pnpm test
+pnpm build
+----
+
+== Environment Variables
+
+| Variable | Default | Required now | Notes |
+|---|---:|---:|---|
+| `HOST` | `0.0.0.0` | No | Bind address for the HTTP server. |
+| `PORT` | `3000` | No | HTTP port. Must be between 1 and 65535. |
+| `NODE_ENV` | `development` | No | Standard Node runtime mode. |
+| `DATABASE_URL` | none | *Yes* | Required at startup. The server will refuse to start without it. Format: `postgresql://user:pass@host:port/db`. |
+
+== Health Endpoint
+
+[source,http]
+----
+GET /health
+----
+
+Expected response:
+
+[source,json]
+----
+{
+  "status": "ok",
+  "service": "budget-wise-server",
+  "version": "3.7.0",
+  "timestamp": "2026-05-21T00:00:00.000Z"
+}
+----
+
+== User Registration Endpoint
+
+[source,http]
+----
+POST /users
+Content-Type: application/json
+----
+
+This is a public endpoint — replay protection is intentionally skipped since
+clients call it before they have a nonce.
+
+Request body:
+
+[source,json]
+----
+{
+  "emailHash": "<BLAKE2b-256(lowercase(email) + EMAIL_HASH_PEPPER), 64 hex chars>",
+  "publicKey": "<base64url-encoded X25519 public key, exactly 43 chars>"
+}
+----
+
+The raw email is never sent to or stored by the server. The client applies the
+pepper and hashes the email before sending.
+
+Responses:
+
+- `201` — registration successful: `{ "status": "registered" }`
+- `400` — validation failure (invalid format for `emailHash` or `publicKey`)
+- `409` — email hash already registered: `{ "error": "Email already registered" }`
+- `500` — unexpected server error
+
+== Account Key Uploads & Recovery
+
+Batch key upload endpoints are owner-driven helpers used when rotating an
+account key after a member removal. There are two relevant routes:
+
+- `POST /v1/accounts/:id/members/:userId/keys/batch` — atomically removes the
+  specified member, increments the account `key_epoch`, and uploads the new
+  wrapped keys for remaining members.
+- `POST /v1/accounts/:id/keys/batch` — owner-only batch upload for inserting
+  wrapped keys when the epoch is already known.
+
+Important behavior notes for API consumers:
+
+- If a `wrapped_keys` batch contains any `user_id` that is not a current
+  account member, the server rejects the entire request with `409` and a JSON
+  body of `{ "error": "non_member" }`. No keys are inserted when this
+  response is returned — clients must remove stale/removed users before retrying.
+
+- The member-removal + key-upload route (`/members/:userId/keys/batch`) is
+  implemented transactionally on the server: removal, epoch increment, and
+  key insertion happen together so a successful response guarantees the
+  epoch and keys are consistent.
+
+Client recovery pattern (recommended):
+
+When rotating keys locally the client should persist the generated wrapped
+keys and intended epoch in a durable local store before calling the server.
+If the network upload fails (for example, due to a transient error) the
+client can retry the upload on the next sync using the stored pending rotation
+entry. The Budget client implements this via a Dexie table `pendingKeyRotations`
+and retries uploads from that queue during normal sync runs.
+
+== Replay Protection
+
+Mutation routes are protected by a root-level Fastify `preHandler` hook. Public
+routes and explicitly exempt routes can set `config.skipNonce = true`.
+
+[source,http]
+----
+GET /v1/nonce
+----
+
+Expected response:
+
+[source,json]
+----
+{
+  "nonce": "16-random-bytes-base64url",
+  "expires_at": "2026-05-21T00:01:30.000Z"
+}
+----
+
+Protected mutation requests (`POST`, `PUT`, `PATCH`, `DELETE`) must include:
+
+[source,http]
+----
+X-Nonce: <server-issued nonce>
+X-Timestamp: <Date.now() epoch milliseconds>
+----
+
+The in-process nonce store is suitable only for local development and
+single-instance dev/staging environments. Production deployments with multiple
+instances need a shared store with atomic consume semantics, such as Redis or a
+PostgreSQL nonces table.
+
+== Database
+
+The `users` table is defined in `packages/server/src/db/schema.ts` and the
+migration is committed at `packages/server/drizzle/0001_users.sql`.
+
+The migration journal at `packages/server/drizzle/meta/_journal.json` is
+required by Drizzle's migrator — it will not discover bare SQL files without it.
+
+Apply migrations before starting the server:
+
+[source,bash]
+----
+export DATABASE_URL=postgresql://user:pass@host:port/db
+pnpm --filter @budget/server run db:migrate
+----
+
+To regenerate migrations after schema changes:
+
+[source,bash]
+----
+export DATABASE_URL=postgresql://user:pass@host:port/db
+pnpm --filter @budget/server run db:generate
+----
+
+Relevant files:
+
+- `packages/server/drizzle.config.ts`
+- `packages/server/src/db/client.ts`
+- `packages/server/src/db/schema.ts`
+- `packages/server/drizzle/0001_users.sql`
+- `packages/server/drizzle/meta/_journal.json`
+
+== Docker
+
+Build from the repository root:
+
+[source,bash]
+----
+docker build -f packages/server/Dockerfile -t budget-wise-server:local .
+----
+
+Run locally (requires a reachable PostgreSQL instance):
+
+[source,bash]
+----
+docker run --rm -p 3000:3000 \
+  -e DATABASE_URL=postgresql://budget:budget@host.docker.internal:5432/budget \
+  budget-wise-server:local
+curl http://localhost:3000/health
+----
+
+The recommended repeatable local Docker workflow is Docker Compose:
+
+[source,bash]
+----
+pnpm stack:server
+curl http://127.0.0.1:3095/health
+curl http://127.0.0.1:3095/v1/nonce
+----
+
+`pnpm stack:server` waits for PostgreSQL, runs the committed Drizzle
+migrations through a one-shot migration service, and then starts the compiled
+server container. This is still a local smoke-test setup, not the production
+AWS deployment architecture.
+
+== CI Expectations
+
+The server is registered as an Nx project named `server` with these targets:
+
+- `serve`
+- `build`
+- `lint`
+- `typecheck`
+- `test`
+
+GitLab CI now uses Node 22. Existing Nx affected jobs should include server lint, typecheck, test, and build when files under `packages/server` change.
+
+== Deployment Status
+
+The scaffold is container-ready and CI-ready:
+
+- The server runs from `packages/server/dist/main.js`.
+- The container exposes `PORT`, defaulting to `3000`.
+- The container runs the Node process as a non-root user.
+- The container defines a Docker healthcheck against `GET /health`.
+- Runtime configuration is environment-variable based.
+- `DATABASE_URL` is *required* — the server will refuse to start without it.
+- Local and Docker `/health` smoke tests pass when a database is available.
+
+Real dev/staging deployment is still pending. The remaining German-team decisions are:
+
+- Target platform for container deployment.
+- Container registry and image naming convention.
+- Dev/staging PostgreSQL endpoints and where `DATABASE_URL` is stored.
+- DNS/TLS ownership for dev/staging URLs.
+- Operational ownership for logs, monitoring, backups, and restore.
+
+Until those decisions are locked, `/health` smoke checks remain local and CI-only rather than deployed dev/staging checks.

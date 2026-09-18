@@ -1,0 +1,40 @@
+@startuml Command_Change_Capture_Architecture
+skinparam componentStyle uml2
+skinparam defaultFontSize 12
+skinparam packagePadding 20
+
+title Command-Based Change Capture
+
+' ── Write Path ──────────────────────────────────
+
+component "BudgetContext" as context
+
+component "BudgetService\n(Facade)" as service #lightyellow
+
+component "Repositories" as repos
+
+component "ChangeLog" as changelog #lightyellow
+
+database "IndexedDB" as indexeddb
+
+' ── Flow ────────────────────────────────────────
+
+context -down-> service : write
+
+service -down-> repos : apply
+service -down-> changelog : append
+
+repos -down-> indexeddb : persist
+changelog -down-> indexeddb : persist
+
+note right of service
+  Single write API
+  Repos not exported
+end note
+
+note right of changelog
+  Append-only log
+  for Phase 2 sync
+end note
+
+@enduml

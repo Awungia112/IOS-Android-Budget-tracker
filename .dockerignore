@@ -1,0 +1,57 @@
+# Dependencies (installed inside Docker via pnpm install)
+node_modules
+**/node_modules
+
+# Build output (rebuilt inside Docker)
+dist
+**/dist
+coverage
+
+# Git
+.git
+.gitignore
+.husky
+!.husky/install.mjs
+
+# CI/CD
+.gitlab-ci.yml
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+**/Dockerfile
+
+# Test artifacts
+playwright-report
+test-results
+**/test-results
+.lighthouseci
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Mobile native projects (not needed in server image)
+android
+ios
+
+# App package source (not needed in server image)
+packages/app/public
+packages/app/src
+packages/app/*.html
+
+# Nx cache
+.nx
+
+# TypeScript incremental build cache
+*.tsbuildinfo

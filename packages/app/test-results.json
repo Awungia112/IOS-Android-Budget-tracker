@@ -1,0 +1,466 @@
+{
+  "config": {
+    "configFile": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/playwright.config.ts",
+    "rootDir": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests",
+    "forbidOnly": false,
+    "fullyParallel": true,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 4
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 4
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 4
+        },
+        "id": "webkit",
+        "name": "webkit",
+        "testDir": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "runAgents": "none",
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.58.2",
+    "workers": 4,
+    "webServer": {
+      "command": "pnpm run preview",
+      "url": "http://localhost:8080",
+      "reuseExistingServer": true,
+      "timeout": 120000,
+      "env": {
+        "NODE_ENV": "test"
+      }
+    }
+  },
+  "suites": [
+    {
+      "title": "categories.spec.ts",
+      "file": "categories.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Category Management",
+          "file": "categories.spec.ts",
+          "line": 11,
+          "column": 6,
+          "specs": [
+            {
+              "title": "verify income categories page grid",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 13314,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('category-grid')\nExpected: visible\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('category-grid')\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('category-grid')\nExpected: visible\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('category-grid')\u001b[22m\n\n    at /Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts:21:57",
+                        "location": {
+                          "file": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts",
+                          "column": 57,
+                          "line": 21
+                        },
+                        "snippet": "  19 |\n  20 |         // Verify grid is visible\n> 21 |         await expect(page.getByTestId('category-grid')).toBeVisible({ timeout: 10000 });\n     |                                                         ^\n  22 |\n  23 |         // Check for default income category - use button with General text\n  24 |         await expect(page.locator('button:has-text(\"General\")').or(page.locator('button:has-text(\"Allgemein\")'))).toBeVisible();"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts",
+                            "column": 57,
+                            "line": 21
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('category-grid')\nExpected: visible\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('category-grid')\u001b[22m\n\n\n  19 |\n  20 |         // Verify grid is visible\n> 21 |         await expect(page.getByTestId('category-grid')).toBeVisible({ timeout: 10000 });\n     |                                                         ^\n  22 |\n  23 |         // Check for default income category - use button with General text\n  24 |         await expect(page.locator('button:has-text(\"General\")').or(page.locator('button:has-text(\"Allgemein\")'))).toBeVisible();\n    at /Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts:21:57"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-03-03T10:45:47.790Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/test-results/categories-Category-Manage-d64f2-income-categories-page-grid-chromium/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts",
+                        "column": 57,
+                        "line": 21
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "262c5455b60c16e7a404-a4ab37129b353c735a6f",
+              "file": "categories.spec.ts",
+              "line": 16,
+              "column": 5
+            },
+            {
+              "title": "verify expense categories page grid",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 1,
+                      "status": "failed",
+                      "duration": 13359,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('category-grid')\nExpected: visible\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('category-grid')\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('category-grid')\nExpected: visible\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('category-grid')\u001b[22m\n\n    at /Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts:32:57",
+                        "location": {
+                          "file": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts",
+                          "column": 57,
+                          "line": 32
+                        },
+                        "snippet": "  30 |\n  31 |         // Verify grid is visible\n> 32 |         await expect(page.getByTestId('category-grid')).toBeVisible({ timeout: 10000 });\n     |                                                         ^\n  33 |\n  34 |         // Check for default expense categories - use getByText which is more flexible\n  35 |         // Verify at least \"General\" (Allgemein) default expense category is visible"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts",
+                            "column": 57,
+                            "line": 32
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('category-grid')\nExpected: visible\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('category-grid')\u001b[22m\n\n\n  30 |\n  31 |         // Verify grid is visible\n> 32 |         await expect(page.getByTestId('category-grid')).toBeVisible({ timeout: 10000 });\n     |                                                         ^\n  33 |\n  34 |         // Check for default expense categories - use getByText which is more flexible\n  35 |         // Verify at least \"General\" (Allgemein) default expense category is visible\n    at /Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts:32:57"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-03-03T10:45:47.826Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/test-results/categories-Category-Manage-c9584-xpense-categories-page-grid-chromium/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts",
+                        "column": 57,
+                        "line": 32
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "262c5455b60c16e7a404-098a56bddfb5df3c5f44",
+              "file": "categories.spec.ts",
+              "line": 27,
+              "column": 5
+            },
+            {
+              "title": "add a new custom category and verify it appears in grid",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 2,
+                      "status": "timedOut",
+                      "duration": 30036,
+                      "error": {
+                        "message": "\u001b[31mTest timeout of 30000ms exceeded.\u001b[39m",
+                        "stack": "\u001b[31mTest timeout of 30000ms exceeded.\u001b[39m"
+                      },
+                      "errors": [
+                        {
+                          "message": "\u001b[31mTest timeout of 30000ms exceeded.\u001b[39m"
+                        },
+                        {
+                          "location": {
+                            "file": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts",
+                            "column": 52,
+                            "line": 44
+                          },
+                          "message": "Error: locator.click: Test timeout of 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByTestId('add-category-fab')\u001b[22m\n\n\n  42 |\n  43 |         // Use FAB button with data-testid\n> 44 |         await page.getByTestId('add-category-fab').click();\n     |                                                    ^\n  45 |\n  46 |         // Fill in category name using more specific selector\n  47 |         const customCategory = 'Hobby 2024';\n    at /Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts:44:52"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-03-03T10:45:47.803Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/test-results/categories-Category-Manage-1d6e9-d-verify-it-appears-in-grid-chromium/error-context.md"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "262c5455b60c16e7a404-6aef26e0da59f68507f7",
+              "file": "categories.spec.ts",
+              "line": 39,
+              "column": 5
+            },
+            {
+              "title": "verify default categories do not show a delete button",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 3,
+                      "parallelIndex": 3,
+                      "status": "failed",
+                      "duration": 13629,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('category-grid')\nExpected: visible\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('category-grid')\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('category-grid')\nExpected: visible\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('category-grid')\u001b[22m\n\n    at /Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts:66:57",
+                        "location": {
+                          "file": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts",
+                          "column": 57,
+                          "line": 66
+                        },
+                        "snippet": "  64 |\n  65 |         // Wait for grid to be visible\n> 66 |         await expect(page.getByTestId('category-grid')).toBeVisible({ timeout: 10000 });\n     |                                                         ^\n  67 |\n  68 |         // Default categories should not have a delete button\n  69 |         // Use data-testid for delete button if available, otherwise look for absolutely positioned buttons"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts",
+                            "column": 57,
+                            "line": 66
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('category-grid')\nExpected: visible\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('category-grid')\u001b[22m\n\n\n  64 |\n  65 |         // Wait for grid to be visible\n> 66 |         await expect(page.getByTestId('category-grid')).toBeVisible({ timeout: 10000 });\n     |                                                         ^\n  67 |\n  68 |         // Default categories should not have a delete button\n  69 |         // Use data-testid for delete button if available, otherwise look for absolutely positioned buttons\n    at /Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts:66:57"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-03-03T10:45:47.894Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/test-results/categories-Category-Manage-25139-do-not-show-a-delete-button-chromium/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts",
+                        "column": 57,
+                        "line": 66
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "262c5455b60c16e7a404-8c71fba6036647431296",
+              "file": "categories.spec.ts",
+              "line": 61,
+              "column": 5
+            },
+            {
+              "title": "delete a custom category via confirmation dialog",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 4,
+                      "parallelIndex": 0,
+                      "status": "timedOut",
+                      "duration": 30038,
+                      "error": {
+                        "message": "\u001b[31mTest timeout of 30000ms exceeded.\u001b[39m",
+                        "stack": "\u001b[31mTest timeout of 30000ms exceeded.\u001b[39m"
+                      },
+                      "errors": [
+                        {
+                          "message": "\u001b[31mTest timeout of 30000ms exceeded.\u001b[39m"
+                        },
+                        {
+                          "location": {
+                            "file": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts",
+                            "column": 52,
+                            "line": 78
+                          },
+                          "message": "Error: locator.click: Test timeout of 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByTestId('add-category-fab')\u001b[22m\n\n\n  76 |         // 1. Create a custom category first\n  77 |         const deleteMe = 'Temporary Trip';\n> 78 |         await page.getByTestId('add-category-fab').click();\n     |                                                    ^\n  79 |         \n  80 |         await page.getByPlaceholder('Category').fill(deleteMe);\n  81 |         await expect(page.getByAltText('pineapple')).toBeVisible();\n    at /Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts:78:52"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-03-03T10:46:03.829Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/test-results/categories-Category-Manage-31c11-ory-via-confirmation-dialog-chromium/error-context.md"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "262c5455b60c16e7a404-f0872db6d84e928468f4",
+              "file": "categories.spec.ts",
+              "line": 73,
+              "column": 5
+            },
+            {
+              "title": "add custom category and verify it is available in transaction selection",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 5,
+                      "parallelIndex": 1,
+                      "status": "timedOut",
+                      "duration": 30031,
+                      "error": {
+                        "message": "\u001b[31mTest timeout of 30000ms exceeded.\u001b[39m",
+                        "stack": "\u001b[31mTest timeout of 30000ms exceeded.\u001b[39m"
+                      },
+                      "errors": [
+                        {
+                          "message": "\u001b[31mTest timeout of 30000ms exceeded.\u001b[39m"
+                        },
+                        {
+                          "location": {
+                            "file": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts",
+                            "column": 52,
+                            "line": 105
+                          },
+                          "message": "Error: locator.click: Test timeout of 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByTestId('add-category-fab')\u001b[22m\n\n\n  103 |         \n  104 |         const selectionTest = 'Secret Fund';\n> 105 |         await page.getByTestId('add-category-fab').click();\n      |                                                    ^\n  106 |         \n  107 |         await page.getByPlaceholder('Category').fill(selectionTest);\n  108 |         await page.getByAltText('spaFlower').click();\n    at /Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/e2e/tests/categories.spec.ts:105:52"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-03-03T10:46:03.869Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/gisstudent/adorsys-projects/budget-wise-pwa-now/packages/app/test-results/categories-Category-Manage-2ede5-le-in-transaction-selection-chromium/error-context.md"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "262c5455b60c16e7a404-6452ad7a63277620af6b",
+              "file": "categories.spec.ts",
+              "line": 100,
+              "column": 5
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-03-03T10:45:44.132Z",
+    "duration": 50638.77099999999,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 6,
+    "flaky": 0
+  }
+}

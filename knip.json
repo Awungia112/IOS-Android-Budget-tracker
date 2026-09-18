@@ -1,0 +1,52 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "tags": [
+    "-public"
+  ],
+  "workspaces": {
+    "packages/core": {
+      "project": [
+        "src/**/*.ts",
+        "!src/**/*.test.ts"
+      ]
+    },
+    "packages/app": {
+      "entry": [
+        "src/main.tsx",
+        "src/sw.ts"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}"
+      ],
+      "ignore": [
+        "src/components/ui/**"
+      ]
+    },
+    "packages/server": {
+      "entry": [
+        "src/db/client.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
+    }
+  },
+  "ignore": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "**/ios/**",
+    "**/android/**",
+    "scripts/**"
+  ],
+  "ignoreDependencies": [
+    "@capacitor/ios",
+    "@capawesome/capacitor-android-edge-to-edge-support",
+    "@nx/vite"
+  ],
+  "ignoreBinaries": [
+    "unset"
+  ],
+  "ignoreExportsUsedInFile": true
+}

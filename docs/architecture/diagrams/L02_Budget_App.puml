@@ -1,0 +1,37 @@
+@startuml L02_Budget_App
+skinparam componentStyle uml2
+
+title @budget/app - Presentation Layer
+
+component "Pages" as pages #lightyellow
+component "Components" as components #lightyellow
+component "Hooks" as hooks #lightyellow
+component "Contexts" as contexts #lightyellow
+component "i18n" as i18n #lightyellow
+component "lib" as lib #lightyellow
+
+interface "State API" as stateApi #white
+interface "Core API" as coreApi #white
+
+pages ..> hooks : use
+components ..> hooks : use
+hooks ..> contexts : consume
+contexts ..> lib : use
+contexts - stateApi
+
+stateApi ..> coreApi : import\n@budget/core
+
+note right of pages
+  Index, Statistics,
+  Categories, Limits,
+  Templates, Settings,
+  SavingsGoals
+end note
+
+note right of contexts
+  BudgetContext
+  AccountContext
+  ThemeContext
+end note
+
+@enduml

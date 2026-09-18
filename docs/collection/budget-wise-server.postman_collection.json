@@ -1,0 +1,442 @@
+{
+  "info": {
+    "name": "Budget Wise Server API",
+    "description": "Complete API collection for the Budget Wise PWA backend.\n\n## Authentication flow\n1. `POST /users` → register (skipNonce)\n2. `GET /v1/auth/verify?token=...` → validate magic link (skipNonce)\n3. `POST /v1/auth/verify` → consume token, get session JWT (needs nonce)\n\n## Replay protection\nAll POST/PUT/DELETE mutations (except those marked skipNonce) require:\n- `x-nonce`: obtained from `GET /v1/nonce`\n- `x-timestamp`: current epoch ms\n\nA pre-request script auto-fetches nonces for all mutation requests.\n\n## Variable keys\n- `base_url`: server URL (default `http://localhost:3000`)\n- `session_token`: set automatically after `POST /v1/auth/verify`\n- `account_id`: set after creating an account\n- `email_hash`: hex-encoded BLAKE2b hash of email\n- `public_key`: base64url-encoded X25519 public key (43 chars)\n- `user_id`, `invite_id`: set as needed",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3000", "type": "string" },
+    { "key": "session_token", "value": "", "type": "string" },
+    { "key": "account_id", "value": "", "type": "string" },
+    { "key": "email_hash", "value": "", "type": "string" },
+    { "key": "public_key", "value": "", "type": "string" },
+    { "key": "user_id", "value": "", "type": "string" },
+    { "key": "invite_id", "value": "", "type": "string" },
+    { "key": "change_uuid", "value": "", "type": "string" },
+    { "key": "wrapped_key", "value": "", "type": "string" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "exec": [
+          "// Global pre-request: auto-fetch nonce for mutations",
+          "const method = pm.request.method;",
+          "const url = pm.request.url.toString();",
+          "const mutationMethods = ['POST', 'PUT', 'PATCH', 'DELETE'];",
+          "const skipNonceEndpoints = ['/health', '/users', '/v1/nonce', '/v1/auth/register'];",
+          "",
+          "const needsNonce = mutationMethods.includes(method) &&",
+          "  !skipNonceEndpoints.some(e => url.includes(e)) &&",
+          "  !url.includes('/v1/auth/verify');",
+          "",
+          "if (needsNonce) {",
+          "  const baseUrl = pm.variables.get('base_url');",
+          "  pm.sendRequest(`${baseUrl}/v1/nonce`, (err, res) => {",
+          "    if (err) {",
+          "      console.error('Failed to fetch nonce:', err);",
+          "      return;",
+          "    }",
+          "    const body = res.json();",
+          "    pm.request.headers.add({ key: 'x-nonce', value: body.nonce });",
+          "    pm.request.headers.add({ key: 'x-timestamp', value: String(Date.now()) });",
+          "  });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] }
+          }
+        },
+        {
+          "name": "Get nonce",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/v1/nonce", "host": ["{{base_url}}"], "path": ["v1", "nonce"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "POST /users — Register",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emailHash\": \"aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffffffffff00000000\",\n  \"publicKey\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/users", "host": ["{{base_url}}"], "path": ["users"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "POST /v1/auth/register — Send magic link",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email_hash\": \"aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffffffffff00000000\",\n  \"public_key\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n  \"email\": \"user@example.com\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/v1/auth/register", "host": ["{{base_url}}"], "path": ["v1", "auth", "register"] }
+          }
+        },
+        {
+          "name": "GET /v1/auth/verify?token= — Validate magic link",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/v1/auth/verify?token=YOUR_MAGIC_LINK_JWT", "host": ["{{base_url}}"], "path": ["v1", "auth", "verify"], "query": [{ "key": "token", "value": "YOUR_MAGIC_LINK_JWT" }] }
+          }
+        },
+        {
+          "name": "POST /v1/auth/verify — Consume token, get session",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"YOUR_MAGIC_LINK_JWT\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/v1/auth/verify", "host": ["{{base_url}}"], "path": ["v1", "auth", "verify"] },
+            "event": [
+              {
+                "listen": "test",
+                "script": {
+                  "exec": [
+                    "const json = pm.response.json();",
+                    "if (json.token) {",
+                    "  pm.collectionVariables.set('session_token', json.token);",
+                    "  pm.variables.set('session_token', json.token);",
+                    "  console.log('Session token stored');",
+                    "}"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Accounts",
+      "item": [
+        {
+          "name": "GET /v1/accounts — List accounts",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{session_token}}" }],
+            "url": { "raw": "{{base_url}}/v1/accounts", "host": ["{{base_url}}"], "path": ["v1", "accounts"] },
+            "event": [
+              {
+                "listen": "test",
+                "script": {
+                  "exec": [
+                    "const json = pm.response.json();",
+                    "if (json.accounts && json.accounts.length > 0) {",
+                    "  pm.collectionVariables.set('account_id', json.accounts[0].id);",
+                    "}"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "POST /v1/accounts — Create account",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{session_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"wrapped_key\": {\n    \"v\": 1,\n    \"alg\": \"x25519-xsalsa20-poly1305\",\n    \"ciphertext\": \"BASE64URL_CIPHERTEXT\"\n  },\n  \"epoch\": 1\n}"
+            },
+            "url": { "raw": "{{base_url}}/v1/accounts", "host": ["{{base_url}}"], "path": ["v1", "accounts"] },
+            "event": [
+              {
+                "listen": "test",
+                "script": {
+                  "exec": [
+                    "const json = pm.response.json();",
+                    "if (json.id) {",
+                    "  pm.collectionVariables.set('account_id', json.id);",
+                    "}"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "GET /v1/accounts/:id/keys — Get account key",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{session_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/accounts/{{account_id}}/keys",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "accounts", "{{account_id}}", "keys"]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/accounts/:id/keys?epoch=N — Key at specific epoch",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{session_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/accounts/{{account_id}}/keys?epoch=1",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "accounts", "{{account_id}}", "keys"],
+              "query": [{ "key": "epoch", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/accounts/:id/members — List members",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{session_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/accounts/{{account_id}}/members",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "accounts", "{{account_id}}", "members"]
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/accounts/:id/members/:userId — Remove member",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{session_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/accounts/{{account_id}}/members/{{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "accounts", "{{account_id}}", "members", "{{user_id}}"]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/accounts/:id/members/:userId/keys/batch — Remove + rekey",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{session_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"wrapped_keys\": [\n    {\n      \"user_id\": \"22222222-2222-4222-8222-222222222222\",\n      \"wrapped_key\": {\n        \"v\": 1,\n        \"alg\": \"x25519-xsalsa20-poly1305\",\n        \"ciphertext\": \"BASE64URL_CIPHERTEXT\"\n      }\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/accounts/{{account_id}}/members/{{user_id}}/keys/batch",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "accounts", "{{account_id}}", "members", "{{user_id}}", "keys", "batch"]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/accounts/:id/keys/batch — Batch upload wrapped keys",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{session_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"new_epoch\": 2,\n  \"wrapped_keys\": [\n    {\n      \"user_id\": \"22222222-2222-4222-8222-222222222222\",\n      \"wrapped_key\": {\n        \"v\": 1,\n        \"alg\": \"x25519-xsalsa20-poly1305\",\n        \"ciphertext\": \"BASE64URL_CIPHERTEXT_FOR_NEW_KEY\"\n      }\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/accounts/{{account_id}}/keys/batch",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "accounts", "{{account_id}}", "keys", "batch"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Change Records",
+      "item": [
+        {
+          "name": "POST /v1/accounts/:id/records — Push change records",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{session_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"records\": [\n    {\n      \"change_uuid\": \"33333333-3333-4333-8333-333333333333\",\n      \"encrypted_payload\": {\n        \"v\": 1,\n        \"alg\": \"xsalsa20-poly1305\",\n        \"nonce\": \"24BYTE_BASE64URL_NONCE\",\n        \"ciphertext\": \"BASE64URL_CIPHERTEXT\"\n      }\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/accounts/{{account_id}}/records",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "accounts", "{{account_id}}", "records"]
+            },
+            "event": [
+              {
+                "listen": "test",
+                "script": {
+                  "exec": [
+                    "const json = pm.response.json();",
+                    "if (json.results && json.results.length > 0) {",
+                    "  pm.collectionVariables.set('change_uuid', json.results[0].change_uuid);",
+                    "}"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "GET /v1/accounts/:id/records?since=0 — Pull change records (all)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{session_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/accounts/{{account_id}}/records?since=0",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "accounts", "{{account_id}}", "records"],
+              "query": [{ "key": "since", "value": "0" }]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/accounts/:id/records?since=N — Pull from cursor",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{session_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/accounts/{{account_id}}/records?since=5",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "accounts", "{{account_id}}", "records"],
+              "query": [{ "key": "since", "value": "5" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invites",
+      "item": [
+        {
+          "name": "POST /v1/accounts/:id/invites — Create invite",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{session_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipient_email_hash\": \"bbbbbbbbccccccccddddddddeeeeeeeeffffffffffffff0000000011111111\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/accounts/{{account_id}}/invites",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "accounts", "{{account_id}}", "invites"]
+            },
+            "event": [
+              {
+                "listen": "test",
+                "script": {
+                  "exec": [
+                    "const json = pm.response.json();",
+                    "if (json.id) {",
+                    "  pm.collectionVariables.set('invite_id', json.id);",
+                    "}"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "GET /v1/invites/pending — List pending invites",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{session_token}}" }],
+            "url": { "raw": "{{base_url}}/v1/invites/pending", "host": ["{{base_url}}"], "path": ["v1", "invites", "pending"] }
+          }
+        },
+        {
+          "name": "POST /v1/invites/:id/accept — Accept invite",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{session_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/invites/{{invite_id}}/accept",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "invites", "{{invite_id}}", "accept"]
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/invites/:id — Cancel invite",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{session_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/invites/{{invite_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "invites", "{{invite_id}}"]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/accounts/:id/pending-key-requests — List key deliveries",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{session_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/accounts/{{account_id}}/pending-key-requests",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "accounts", "{{account_id}}", "pending-key-requests"]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/accounts/:id/keys — Deliver wrapped key to recipient",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{session_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"33333333-3333-4333-8333-333333333333\",\n  \"wrapped_key\": {\n    \"v\": 1,\n    \"alg\": \"x25519-xsalsa20-poly1305\",\n    \"ciphertext\": \"BASE64URL_CIPHERTEXT\"\n  },\n  \"epoch\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/accounts/{{account_id}}/keys",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "accounts", "{{account_id}}", "keys"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

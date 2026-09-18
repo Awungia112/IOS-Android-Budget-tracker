@@ -1,0 +1,492 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =============================================================================
+   CROSS-DEVICE COMPATIBILITY LAYER
+   This pattern follows Ionic Framework's CSS variable approach without the full framework.
+   ============================================================================= */
+
+@layer base {
+  :root {
+    /* Safe Area CSS Variables - Auto-populated by Capacitor/WebView on native builds */
+    /* Fallback values for web browsers that don't support env() */
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
+
+    /* App Layout Variables - Centralized for consistency */
+    --header-height: 64px;
+    --bottom-nav-height: 64px;
+    --sidebar-width: 256px;
+  }
+}
+
+@layer base {
+  html {
+    /* Prevent horizontal scroll on mobile */
+    overflow-x: hidden;
+    /* Smooth scrolling for better UX */
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    /* Prevent automatic font size adjustment on orientation change */
+    /* This is the key fix for cross-device font rendering consistency */
+    -webkit-text-size-adjust: 100%;
+    -moz-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    /* iOS 18+ scroll bug prevention */
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    /* Use dynamic viewport height for better mobile support */
+    /* dvh = dynamic viewport height, accounts for browser chrome */
+    min-height: 100vh;
+    min-height: 100dvh;
+    /* Prevent pull-to-refresh on iOS while maintaining swipe navigation */
+    overscroll-behavior-y: none;
+    /* Prevent text selection and callouts on long press (app-like feel) */
+    -webkit-user-select: none;
+    user-select: none;
+    /* Prevent tap highlight on Android (the blue/orange flash) */
+    -webkit-tap-highlight-color: transparent;
+    /* Prevent callout on long press (iOS) */
+    -webkit-touch-callout: none;
+    /* iOS 18+ scroll bug prevention */
+    height: 100%;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #root {
+    /* iOS 18+ scroll bug prevention - root container */
+    height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Allow text selection in input fields (accessibility requirement) */
+  input,
+  textarea,
+  select,
+  [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+    /* Re-enable callout for form fields */
+    -webkit-touch-callout: default;
+  }
+
+  /* iOS Safe Area Support for iPhone X and later devices */
+  /* Only apply safe area styles when env() is supported */
+  @supports (padding: env(safe-area-inset-top)) {
+    /* Main container with safe area - no body padding to avoid double spacing */
+    .min-h-screen {
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
+
+    /* Note: Header, main, nav safe area padding is handled by utility classes
+       in Layout.tsx (ios-header-safe-area, ios-main-safe-area, ios-bottom-safe-area)
+       to avoid double padding issues */
+
+    /* Overlay for sidebar */
+    .sidebar-overlay {
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+    }
+
+    /* Modal/Dialog content with safe area */
+    .dialog-content,
+    .sheet-content {
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+  }
+
+  /* Landscape orientation safe area adjustments */
+  @media (orientation: landscape) and (max-height: 500px) {
+    @supports (padding: env(safe-area-inset-top)) {
+      /* Safe area handled by utility classes - landscape specific adjustments only */
+
+      .sidebar-container {
+        /* Safe area handled by enhanced CSS rules above */
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: 0px; /* No bottom safe area in landscape */
+        padding-left: env(safe-area-inset-left);
+      }
+
+      .sidebar-overlay {
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+    }
+  }
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 210 100% 56%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 198 16% 12%;           /* #1A2124 */
+    --foreground: 210 40% 98%;
+    --card: 198 16% 12%;                 /* #1A2124 - match background */
+    --card-foreground: 210 40% 98%;
+    --popover: 198 16% 12%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 207 89% 40%;              /* #0B75C2 - budget-blue */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 16% 62%;     /* ~gray-400 */
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 195 9% 20%;               /* subtle border */
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+    --sidebar-background: 198 16% 12%;   /* #1A2124 */
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 207 89% 40%;      /* #0B75C2 */
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 198 14% 16%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 210 12% 20%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border font-sans;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer base {
+  .border-custom {
+    @apply border-gray-200 dark:border-gray-700;
+  }
+
+  /* Budget app specific colors */
+  .bg-budget-header {
+    @apply bg-[#3a464f] !important;
+  }
+  
+  .bg-budget-dark {
+    @apply bg-[#1a2124] !important;
+  }
+
+}
+
+/* Custom classes */
+@layer components {
+  .income-text {
+    @apply text-budget-green font-medium;
+  }
+
+  .expense-text {
+    @apply text-budget-red font-medium;
+  }
+
+  .balance-text {
+    @apply font-medium;
+  }
+
+  .positive-balance {
+    @apply text-budget-green;
+  }
+
+  .negative-balance {
+    @apply text-budget-red;
+  }
+
+  .neutral-indicator {
+    @apply text-budget-yellow;
+  }
+
+  .card-content {
+    @apply bg-card text-card-foreground rounded-lg shadow-md p-4;
+  }
+
+  .primary-button {
+    @apply bg-primary text-primary-foreground rounded-lg py-2 px-4 hover:opacity-90 transition-opacity;
+  }
+
+  .secondary-button {
+    @apply border border-border text-foreground rounded-lg py-2 px-4 hover:bg-accent transition-colors;
+  }
+
+  .add-income-button {
+    @apply bg-mint-green text-white rounded-full w-12 h-12 flex items-center justify-center hover:opacity-90 transition-opacity shadow-md;
+  }
+
+  .add-expense-button {
+    @apply bg-pink-bright text-white rounded-full w-12 h-12 flex items-center justify-center hover:opacity-90 transition-opacity shadow-md;
+  }
+
+  /* =============================================================================
+     BOTTOM SHEET HEIGHT CAP
+     The single height cap for DrawerContent. Everything inside a drawer is one
+     scroll region (body: overflow-y-auto + flex-1), so this is the only value
+     that decides how much of the page stays visible behind the sheet.
+
+     Two declarations on purpose: `dvh` is unsupported below Chrome 108 (Android
+     WebViews that never auto-update, e.g. Huawei devices without Play Services),
+     where the whole declaration is dropped. Without the `vh` line the cap would
+     silently evaporate there and the sheet would grow past the viewport — the
+     full-screen white sheet reported in #487. `vh` applies everywhere; `dvh`
+     overrides it where supported, so the cap tracks the keyboard.
+     ============================================================================= */
+
+  .drawer-cap {
+    max-height: 75vh;
+    max-height: 75dvh;
+  }
+
+  /* =============================================================================
+     SAFE AREA UTILITY CLASSES - CROSS-DEVICE SUPPORT
+     Supports: iPhone 8/8+, iPhone X+, Notch/Punch-hole, Android 11-16+
+     ============================================================================= */
+
+  .ios-header-safe-area {
+    /* Header with safe area for notch - use centralized variables */
+    padding-top: var(--safe-area-top);
+    padding-left: var(--safe-area-left);
+    padding-right: var(--safe-area-right);
+    /* Ensure background extends behind status bar for solid appearance */
+    background-color: inherit;
+    /* Create pseudo-element to extend background behind safe area */
+    position: relative;
+  }
+
+  .ios-header-safe-area::before {
+    /* Extend background behind notch and status bar */
+    content: "";
+    position: absolute;
+    top: calc(-1 * var(--safe-area-top));
+    left: calc(-1 * var(--safe-area-left));
+    right: calc(-1 * var(--safe-area-right));
+    height: var(--safe-area-top);
+    background-color: inherit;
+    z-index: -1;
+  }
+
+  .ios-main-safe-area {
+    /* Main content area - safe area consideration without top padding */
+    padding-left: var(--safe-area-left);
+    padding-right: var(--safe-area-right);
+    padding-bottom: var(--safe-area-bottom);
+    /* Remove top padding to eliminate space while keeping safe area for sides/bottom */
+    padding-top: 0px;
+  }
+
+  .ios-bottom-safe-area {
+    /* Default: no bottom padding; iOS Safari handles inset via env() */
+    /* Additional bottom padding is applied for non-iOS via @supports below */
+    padding-bottom: 0px;
+    padding-left: var(--safe-area-left);
+    padding-right: var(--safe-area-right);
+  }
+
+  /* Apply bottom safe area for non-iOS devices */
+  @supports not (-webkit-touch-callout: none) {
+    .ios-bottom-safe-area {
+      padding-bottom: var(--safe-area-bottom);
+    }
+  }
+
+  /* iOS sidebar bleeding fix - ensure content starts below status bar */
+  /* Use proper container structure with overflow control */
+  .sidebar-container {
+    /* Container should not scroll; inner .sidebar-content handles scrolling */
+    -webkit-overflow-scrolling: touch;
+    /* Explicit overflow properties for proper scrolling behavior */
+    overflow: visible; /* Container should be visible, content scrolls */
+    /* Performance optimization for older devices - prevent jank */
+    -webkit-backface-visibility: hidden;
+    -webkit-perspective: 1000;
+    /* Hardware acceleration for smoother scrolling */
+    transform: translateZ(0);
+    /* Ensure proper positioning and z-index stacking */
+    position: fixed;
+    z-index: 30;
+    /* iOS sidebar bleeding fix - ensure content starts below status bar */
+    top: 0;
+    height: 100vh;
+    /* Use padding so background color still fills top bar area */
+    padding-top: env(safe-area-inset-top, 20px);
+    /* Keep background color behind status bar but content below it */
+    background-clip: padding-box;
+    /* Crucial: Ensure sidebar itself handles scrolling, not the body */
+    display: flex;
+    flex-direction: column;
+    /* Base padding for all devices */
+    padding-bottom: 0px;
+    padding-left: 0px;
+    padding-right: 0px;
+  }
+
+  /* The scrollable content inside the sidebar */
+  .sidebar-content {
+    flex: 1;
+    overflow-y: auto; /* Actual scrolling surface */
+    -webkit-overflow-scrolling: touch; /* Momentum scrolling */
+    padding: 0px; /* Let container handle safe area padding */
+  }
+
+  /* Enhanced safe area support for modern devices */
+  @supports (padding: env(safe-area-inset-top)) {
+    .sidebar-container {
+      /* Apply safe area insets only on supported devices */
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: 0px; /* No bottom safe area for sidebar */
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+    }
+  }
+
+  /* iOS-specific fixes for status bar overlap and scroll bug */
+  @supports (-webkit-touch-callout: none) {
+    .sidebar-container {
+      /* Prevent content from scrolling under status bar on iOS */
+      padding-top: env(safe-area-inset-top, 44px); /* iOS status bar fallback */
+      /* Ensure smooth scrolling on iOS */
+      -webkit-overflow-scrolling: touch;
+      /* Prevent rubber band scrolling effect and iOS 18+ scroll bug */
+      overscroll-behavior: contain;
+      /* Prevent position fixed elements from wiggling on iOS 18+ */
+      will-change: transform;
+      /* Ensure container doesn't scroll - only inner content */
+      overflow: hidden;
+    }
+  }
+
+  /* Android 16+ fallback for broken safe area insets */
+  @media (display-mode: standalone) {
+    :root {
+      /* On Android 16, we force a 32px-48px floor if inset is missing */
+      --pwa-safe-bottom: max(env(safe-area-inset-bottom), 32px);
+    }
+
+    .ios-bottom-safe-area {
+      padding-bottom: var(--pwa-safe-bottom);
+    }
+  }
+
+  /* Older device fallbacks (iPhone 8, Android 9-10) */
+  @supports not (padding: env(safe-area-inset-top)) {
+    .sidebar-container {
+      /* Fallback padding for older devices */
+      padding-top: 20px; /* Approximate status bar height */
+      padding-bottom: 0px;
+      padding-left: 0px;
+      padding-right: 0px;
+    }
+  }
+
+  /* Utility for category icons to handle selection contrast across themes */
+  .avatar-icon-selected {
+    filter: brightness(0) invert(1);
+  }
+
+  .dark .avatar-icon-selected {
+    filter: brightness(0);
+  }
+}
+
+/* Fix calendar/date input text color in dark mode */
+.dark input[type="date"],
+.dark input[type="datetime-local"],
+.dark input[type="time"] {
+  color-scheme: dark;
+  background-color: #1a1a1a;
+  color: #fff;
+  border-color: #333;
+}
+
+/* Fix select and option text color in dark mode */
+.dark select,
+.dark option {
+  background-color: #1a1a1a;
+  color: #fff;
+}
+
+/* Prevent iOS Safari from zooming on input focus */
+@supports (-webkit-touch-callout: none) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Slide-up animation for offline indicator */
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out forwards;
+}
+
+/* Loading bar animation for the app loading screen */
+@keyframes splash-bar {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}

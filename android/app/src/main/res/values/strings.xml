@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Mein Budget</string>
+    <string name="title_activity_main">Mein Budget</string>
+    <string name="package_name">de.deutschlandimplus.meinbudget</string>
+    <string name="custom_url_scheme">budgetwise</string>
+</resources>

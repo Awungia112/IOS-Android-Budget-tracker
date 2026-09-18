@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "exportedAt": "2024-03-15T10:30:00.000Z",
+  "platform": "android",
+  "accounts": [
+    {
+      "id": "123e4567-e89b-12d3-a456-426614174000",
+      "name": "Main Account",
+      "legacyId": 1,
+      "legacySource": "room"
+    }
+  ],
+  "categories": [
+    {
+      "id": "223e4567-e89b-12d3-a456-426614174000",
+      "name": "Groceries",
+      "legacyId": 2,
+      "legacySource": "room"
+    }
+  ],
+  "transactions": [
+    {
+      "id": "323e4567-e89b-12d3-a456-426614174000",
+      "accountId": "123e4567-e89b-12d3-a456-426614174000",
+      "categoryId": "223e4567-e89b-12d3-a456-426614174000",
+      "amount": 12.5,
+      "date": "2024-03-15T10:30:00.000Z",
+      "title": "Supermarket",
+      "legacyId": 3,
+      "legacySource": "room"
+    }
+  ],
+  "limits": [
+    {
+      "id": "423e4567-e89b-12d3-a456-426614174000",
+      "accountId": "123e4567-e89b-12d3-a456-426614174000",
+      "amount": 500,
+      "categoryId": "223e4567-e89b-12d3-a456-426614174000",
+      "legacyId": 4,
+      "legacySource": "room"
+    }
+  ],
+  "recurringEntries": [
+    {
+      "id": "523e4567-e89b-12d3-a456-426614174000",
+      "accountId": "123e4567-e89b-12d3-a456-426614174000",
+      "categoryId": "223e4567-e89b-12d3-a456-426614174000",
+      "amount": 50,
+      "frequency": "monthly",
+      "startDate": "2024-03-15T10:30:00.000Z",
+      "name": "Phone Bill",
+      "legacyId": 5,
+      "legacySource": "room"
+    }
+  ],
+  "savingGoals": [
+    {
+      "id": "623e4567-e89b-12d3-a456-426614174000",
+      "accountId": "123e4567-e89b-12d3-a456-426614174000",
+      "name": "Vacation",
+      "targetAmount": 1000,
+      "deadline": "2024-12-31T23:59:59.000Z",
+      "categoryId": "223e4567-e89b-12d3-a456-426614174000",
+      "legacyId": 6,
+      "legacySource": "room"
+    }
+  ],
+  "templates": [
+    {
+      "id": "723e4567-e89b-12d3-a456-426614174000",
+      "accountId": "123e4567-e89b-12d3-a456-426614174000",
+      "name": "Standard Transfer",
+      "amount": 100,
+      "categoryId": "223e4567-e89b-12d3-a456-426614174000",
+      "legacyId": 7,
+      "legacySource": "room"
+    }
+  ]
+}

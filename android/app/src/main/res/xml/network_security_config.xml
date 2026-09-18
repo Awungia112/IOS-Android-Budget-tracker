@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    STRICT default network security config.
+
+    Applies to release builds and to any build type that does not provide an
+    override. Debug builds override this file via src/debug/res/xml (see there).
+
+    - cleartextTrafficPermitted="false": no plain HTTP to any host.
+    - trust-anchors: system CAs only. User-installed CA certificates are NOT
+      trusted, so a malicious/locally-installed CA cannot be used to MITM TLS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

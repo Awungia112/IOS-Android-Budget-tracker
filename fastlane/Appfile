@@ -1,0 +1,21 @@
+# Fastlane Appfile Configuration
+# iOS and Android app identifiers and credentials
+
+# Apple ID (fallback method)
+apple_id(ENV["APPLE_ID"]) if ENV["APPLE_ID"]
+
+# Team ID
+if ENV["APPLE_TEAM_ID"]
+  team_id(ENV["APPLE_TEAM_ID"])
+  itc_team_id(ENV["APPLE_TEAM_ID"])
+end
+
+# App identifier
+app_identifier("de.deutschland-im-plus.MeinBudget")
+
+# ===== ANDROID CONFIGURATION =====
+# Google Play Service Account JSON file path
+json_key_file(ENV["GOOGLE_PLAY_JSON_KEY_PATH"]) if ENV["GOOGLE_PLAY_JSON_KEY_PATH"]
+
+# Package name
+package_name("de.deutschlandimplus.meinbudget")

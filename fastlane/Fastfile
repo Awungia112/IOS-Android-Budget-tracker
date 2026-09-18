@@ -1,0 +1,559 @@
+# encoding: utf-8
+# Fastlane configuration for Budget Wise Mobile Apps
+# Android: Play Store | iOS: App Store & TestFlight
+#
+# Production-ready with improved error handling, validation, and DevOps practices
+#
+# Environment Variables Required:
+# ================================
+# iOS:
+#   MATCH_PASSWORD                    - Password for encrypting certificates
+#   APP_STORE_CONNECT_API_KEY_ID      - App Store Connect API key ID
+#   APP_STORE_CONNECT_API_ISSUER_ID   - App Store Connect issuer ID
+#   APP_STORE_CONNECT_API_KEY         - App Store Connect API key content (base64)
+#   APPLE_TEAM_ID                     - Apple Team ID
+#   SLACK_WEBHOOK_URL (optional)      - For notifications
+#   BETA_CONTACT_EMAIL (optional)     - TestFlight beta contact
+#   BETA_CONTACT_PHONE (optional)     - TestFlight beta contact
+#
+# Android:
+#   GOOGLE_PLAY_JSON_KEY_FILE         - Path to service account JSON
+#
+# Optional (for enhanced logging):
+#   BUILD_VERSION                     - Version number (defaults to git tag)
+#   CHANGELOG_FILE                    - Path to changelog (defaults to git log)
+
+# =======================
+# CONFIGURATION
+# =======================
+
+default_platform(:ios)
+
+# Constants
+APP_IDENTIFIER = ENV["APP_IDENTIFIER"] || "de.deutschland-im-plus.MeinBudget"
+APPLE_TEAM_ID = ENV["APPLE_TEAM_ID"]
+IPA_OUTPUT_DIR = "build"
+BETA_CONTACT_EMAIL = ENV["BETA_CONTACT_EMAIL"] || "dipbudgetapp@gmail.com"
+BETA_CONTACT_PHONE = ENV["BETA_CONTACT_PHONE"].to_s
+MATCH_PASSWORD = ENV["MATCH_PASSWORD"]
+GIT_AUTH_TOKEN = ENV["GIT_AUTH_TOKEN"]
+KEY_PATH = ENV["GOOGLE_PLAY_JSON_KEY_PATH"]
+AAB_PATH = ENV["ANDROID_AAB_PATH"]
+APK_PATH = ENV["ANDROID_APK_PATH"]
+# SLACK_WEBHOOK = ENV["SLACK_WEBHOOK_URL"] not necessary now
+
+# =======================
+# VALIDATION & SETUP
+# =======================
+
+def validate_environment
+  UI.header("🔍 Validating environment variables...")
+
+  required_ios_vars = %w[
+    APP_STORE_CONNECT_API_KEY_ID
+    APP_STORE_CONNECT_API_ISSUER_ID
+    APP_STORE_CONNECT_API_KEY
+    APPLE_TEAM_ID
+    MATCH_PASSWORD
+  ]
+
+  required_ios_vars << "GIT_AUTH_TOKEN" if is_ci
+
+  missing_vars = required_ios_vars.select { |var| ENV[var].to_s.empty? }
+
+  if missing_vars.any?
+    UI.error("❌ Missing required environment variables:")
+    missing_vars.each { |var| UI.error("   - #{var}") }
+    raise "Missing environment variables: #{missing_vars.join(', ')}"
+  end
+
+  UI.success("✅ All required environment variables present")
+end
+
+def get_build_metadata
+  commit_hash = sh("git rev-parse --short HEAD").strip
+  branch = sh("git rev-parse --abbrev-ref HEAD").strip
+  timestamp = Time.now.to_i
+  commit_message = sh("git log -1 --pretty=%B").strip
+
+  # Use CI_COMMIT_TAG in tag pipelines (available in GitLab CI),
+  # fall back to git describe for local/non-tag builds
+  # Remove leading 'v' from tag for consistent version format
+  tag = (ENV["CI_COMMIT_TAG"] || sh("git describe --tags --always 2>/dev/null || echo #{commit_hash}").strip).sub(/^v/, "")
+  {
+    commit_hash: commit_hash,
+    branch: branch,
+    timestamp: timestamp,
+    commit_message: commit_message,
+    tag: tag
+  }
+end
+
+def generate_changelog
+  if File.exist?("CHANGELOG.md")
+    UI.message("📄 Using CHANGELOG.md for release notes")
+    return File.read("CHANGELOG.md").lines.take(20).join # First 20 lines
+  else
+    # Fallback: last 10 commits
+    UI.message("📜 Generating changelog from last 10 git commits")
+    return sh("git log --oneline -10").strip
+  end
+rescue StandardError => ex
+   UI.error("❌ Failed to generate changelog: #{ex.class} - #{ex.message}")
+   UI.error("⚠️ Falling back to minimal changelog")
+
+   metadata = get_build_metadata
+   return "Build from commit #{metadata[:tag]} (#{metadata[:commit_hash]})"
+end
+
+# def notify_slack(message:, success: true)
+#   return unless SLACK_WEBHOOK
+#
+#   color = success ? "good" : "danger"
+#   icon = success ? "✅" : "❌"
+#
+#   slack(
+#     slack_url: SLACK_WEBHOOK,
+#     message: "#{icon} #{message}",
+#     success: success,
+#     payload: {
+#       "Build Metadata" => "#{get_build_metadata[:branch]} | #{get_build_metadata[:commit_hash]}"
+#     }
+#   )
+# rescue => ex
+#   UI.warning("⚠️  Slack notification failed: #{ex.message}")
+# end
+
+def asc_api_key
+  app_store_connect_api_key(
+    key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"],
+    issuer_id: ENV["APP_STORE_CONNECT_API_ISSUER_ID"],
+    key_content: ENV["APP_STORE_CONNECT_API_KEY"],
+    is_key_content_base64: true,
+    duration: 500,
+    in_house: false
+  )
+end
+
+# =======================
+# SHARED HELPERS
+# =======================
+
+def sync_certificates
+  UI.header("🔐 Syncing certificates and provisioning profiles...")
+
+  setup_ci if is_ci
+
+  match(
+    type: "appstore",
+    app_identifier: APP_IDENTIFIER,
+    storage_mode: "gitlab_secure_files",
+    api_key: asc_api_key,
+    readonly: is_ci,
+    team_id: APPLE_TEAM_ID,
+    verbose: true
+  )
+
+  UI.success("✅ Certificates synced")
+rescue => ex
+  UI.error("❌ Certificate sync failed: #{ex.message}")
+  raise ex
+end
+
+def build_for_app_store(output_name:, configuration: "Release")
+  # Read version from CI_COMMIT_TAG (e.g., "v3.11.0" -> "3.11.0") or fall back to "0.0.0"
+  # for local builds without a tag.
+  version = ENV["CI_COMMIT_TAG"]&.sub(/^v/, "") || "0.0.0"
+
+  # Must strictly increase on every upload to App Store Connect. The beta and release
+  # lanes both upload from the same job, and retries reuse the same pipeline id, so any
+  # scheme keyed on the pipeline needs a suffix — and a modulo suffix can land *lower*
+  # than the previous upload, which Apple rejects. A timestamp is monotonic everywhere.
+  build_number = Time.now.to_i
+
+  increment_build_number(
+    build_number: build_number,
+    xcodeproj: "ios/App/App.xcodeproj"
+  )
+
+  UI.message("📦 Building version #{version} (build #{build_number})")
+
+  result = build_app(
+    scheme: "App",
+    project: "ios/App/App.xcodeproj",
+    configuration: configuration,
+    export_method: "app-store",
+    clean: true,
+    output_directory: IPA_OUTPUT_DIR,
+    output_name: output_name,
+    xcargs: "DEVELOPMENT_TEAM=#{APPLE_TEAM_ID} PROVISIONING_PROFILE_SPECIFIER='match AppStore #{APP_IDENTIFIER}' MARKETING_VERSION=#{version}",
+    verbose: true
+  )
+
+  ipa_path = result # build_app now returns the **absolute path** and already raises an error if the IPA was not created
+  UI.success("✅ IPA generated at: #{ipa_path}")
+  ipa_path
+rescue => ex
+  UI.error("❌ Build failed: #{ex.message}")
+  raise ex
+end
+
+# =======================
+# ANDROID LANES
+# =======================
+
+# Verify a Play Store upload artifact (AAB or APK) exists and is non-empty before uploading.
+def verify_play_artifact(path, kind)
+  if path.to_s.strip.empty?
+    UI.user_error!("#{kind} path is not set — is the ANDROID_#{kind}_PATH env var exported?")
+  end
+  if !File.exist?(path) || File.zero?(path)
+    UI.user_error!("#{kind} is missing or empty at: #{path}. Check the build step and artifact path.")
+  end
+end
+
+platform :android do
+  before_all do
+      UI.header("🤖 Android Deployment")
+
+      required_vars = %w[
+        ANDROID_PACKAGE_NAME
+        GOOGLE_PLAY_JSON_KEY_PATH
+      ]
+
+      missing = required_vars.select { |v| ENV[v].to_s.strip.empty? }
+          UI.user_error!("Missing required env vars: #{missing.join(', ')}") unless missing.empty?
+
+          # Verify the Play credentials file exists on disk — catches decode/path issues early.
+          # The build artifact (AAB or APK) is validated per-lane, since we may ship either format.
+          [
+            KEY_PATH
+          ].each do |path|
+            if !File.exist?(path.to_s) || File.zero?(path.to_s)
+                UI.user_error!("File is missing or empty at: #{path}. Check your CI secrets and decoding step.")
+            end
+          end
+      begin
+          require 'json'
+          JSON.parse(File.read(KEY_PATH))
+      rescue JSON::ParserError => e
+          UI.user_error!("The Google Play JSON key is not a valid JSON file! Error: #{e.message}")
+      rescue => e
+         UI.user_error!("Could not read the Google Play JSON key: #{e.message}")
+      end
+
+      UI.success("✅ Android environment validated (Files exist, are non-empty, and JSON is valid)")
+  end
+
+  desc "Upload existing AAB to Internal testing (requires Play App Signing)"
+  lane :internal do
+    verify_play_artifact(AAB_PATH, "AAB")
+    upload_to_play_store(
+      track: 'internal',
+      package_name: ENV["ANDROID_PACKAGE_NAME"],
+      json_key: KEY_PATH,
+      aab: AAB_PATH,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      skip_upload_apk: true
+    )
+
+    UI.success("✅ Android internal AAB uploaded")
+  end
+
+  desc "Upload existing APK to Internal testing (legacy signing, no Play App Signing)"
+  lane :internal_apk do
+    verify_play_artifact(APK_PATH, "APK")
+    upload_to_play_store(
+      track: 'internal',
+      package_name: ENV["ANDROID_PACKAGE_NAME"],
+      json_key: KEY_PATH,
+      apk: APK_PATH,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      skip_upload_aab: true
+    )
+
+    UI.success("✅ Android internal APK uploaded")
+  end
+
+  desc "Upload existing AAB to Production (requires Play App Signing)"
+  lane :production do
+      verify_play_artifact(AAB_PATH, "AAB")
+      upload_to_play_store(
+        track: "production",
+        package_name: ENV["ANDROID_PACKAGE_NAME"],
+        json_key: KEY_PATH,
+        aab: AAB_PATH,
+        skip_upload_metadata: true,
+        skip_upload_images: true,
+        skip_upload_screenshots: true,
+        skip_upload_apk: true
+      )
+
+      UI.success("✅ Uploaded AAB to Production Track")
+  end
+
+  desc "Upload existing APK to Production (legacy signing, no Play App Signing)"
+  lane :production_apk do
+      verify_play_artifact(APK_PATH, "APK")
+      upload_to_play_store(
+        track: "production",
+        package_name: ENV["ANDROID_PACKAGE_NAME"],
+        json_key: KEY_PATH,
+        apk: APK_PATH,
+        skip_upload_metadata: true,
+        skip_upload_images: true,
+        skip_upload_screenshots: true,
+        skip_upload_aab: true
+      )
+
+      UI.success("✅ Uploaded APK to Production Track")
+  end
+end
+
+# =======================
+# iOS LANES
+# =======================
+
+platform :ios do
+  before_all do
+    validate_environment
+  end
+
+  # -------------------------
+  # Simulator Build (Testing)
+  # -------------------------
+  desc "Build for iOS Simulator (no code signing required)"
+  lane :simulator do
+    UI.header("📱 Building for iOS Simulator...")
+
+    sh("xcrun simctl list devices available | head -20 || true")
+
+    sh(
+      "xcodebuild",
+      "-project", "../ios/App/App.xcodeproj",
+      "-scheme", "App",
+      "-configuration", "Debug",
+      "-destination", "generic/platform=iOS Simulator",
+      "-derivedDataPath", "../build/derived_data",
+      "CODE_SIGNING_ALLOWED=NO",
+      "ONLY_ACTIVE_ARCH=NO",
+      "build"
+    )
+
+    sh("mkdir -p ../build")
+    simulator_path = "../build/derived_data/Build/Products/Debug-iphonesimulator/App.app"
+    device_path    = "../build/derived_data/Build/Products/Debug-iphoneos/App.app"
+    destination    = "../build/BudgetWise-simulator.app"
+    if File.exist?(simulator_path)
+      sh("cp -R #{simulator_path} #{destination}")
+    elsif File.exist?(device_path)
+      sh("cp -R #{device_path} #{destination}")
+    else
+      UI.error("❌ Simulator build succeeded but no .app bundle found.")
+      raise "Simulator artifact not found in expected paths."
+    end
+
+    UI.success("✅ Simulator app copied to #{destination}")
+  end
+
+  # -------------------------
+  # Certificate Management
+  # -------------------------
+  desc "Sync certificates and provisioning profiles from secure storage"
+  lane :sync_certs do
+    sync_certificates
+  end
+
+  # -------------------------
+  # TestFlight Beta Build
+  # -------------------------
+  desc "Build and upload to TestFlight for beta testing"
+  lane :beta do
+    UI.header("🚀 Building TestFlight Beta")
+
+    begin
+      metadata = get_build_metadata
+
+      ENV["FASTLANE_SKIP_CONFIRMATION"] = "true"
+      ENV["FASTLANE_DONT_STORE_PASSWORD"] = "true"
+
+      # Step 1: Sync certificates
+      sync_certificates
+
+      # Step 2: Build for App Store
+      ipa_path = build_for_app_store(output_name: "BudgetWise-beta")
+
+      # Step 3: Prepare TestFlight metadata
+      changelog = generate_changelog
+
+      UI.message("📝 Changelog: #{changelog[0..100]}...")
+
+      # Step 4: Upload to TestFlight (with retry for intermittent network issues)
+      UI.header("📤 Uploading to TestFlight...")
+
+      # Retry wrapper for intermittent Apple CDN network failures (NSURLErrorDomain -1005)
+      # altool retries internally but can still fail; we retry the entire upload action
+      max_retries = 3
+      retry_delay = 30
+      attempt = 0
+
+      begin
+        attempt += 1
+        upload_to_testflight(
+          api_key: asc_api_key,
+          ipa: ipa_path,
+          changelog: "Version: #{metadata[:tag]}\nCommit: #{metadata[:commit_hash]}\nBranch: #{metadata[:branch]}\n\nChangelog:\n#{changelog}",
+          distribute_external: false,
+          beta_app_review_info: {
+           contact_email: BETA_CONTACT_EMAIL,
+           contact_first_name: "Budget",
+           contact_last_name: "Wise Team",
+           contact_phone: BETA_CONTACT_PHONE,
+           notes: "CI beta build - #{Time.now}"
+                },
+          groups: ["dev-tester"],
+          beta_app_description: "This beta version contains the latest Mein Budget features. Please test and send us your feedback.",
+          notify_external_testers: false,
+          submit_beta_review: false,
+          demo_account_required: false,
+          skip_waiting_for_build_processing: false,
+          wait_for_uploaded_build: true,
+          wait_processing_interval: 30,
+          wait_processing_timeout_duration: 1800
+        )
+      rescue => ex
+        if attempt < max_retries && ex.message.include?("network connection was lost")
+          UI.important("⚠️  Upload failed with network error (attempt #{attempt}/#{max_retries}): #{ex.message}")
+          UI.important("⏳ Waiting #{retry_delay}s before retry...")
+          sleep(retry_delay)
+          retry
+        else
+          raise ex
+        end
+      end
+
+      UI.success("✅ TestFlight upload successful!")
+      UI.success("   Build: #{metadata[:tag]} (#{metadata[:commit_hash]})")
+      UI.success("   Timestamp: #{Time.at(metadata[:timestamp]).to_s}")
+
+    rescue => ex
+      UI.error("❌ TestFlight build failed: #{ex.message}")
+      raise ex
+    end
+  end
+
+  # -------------------------
+  # App Store Release
+  # -------------------------
+  desc "Build and deploy to App Store (submit for review)"
+  lane :release do
+    UI.header("🎯 Building App Store Release")
+
+    begin
+      metadata = get_build_metadata
+      UI.message("📍 Releasing from: #{metadata[:branch]} (#{metadata[:commit_hash]})")
+
+      # Require manual confirmation for production
+      unless is_ci
+        UI.confirm("⚠️  About to submit #{metadata[:tag]} to App Store for review. Continue?")
+      end
+
+      # Step 1: Sync certificates
+      sync_certificates
+
+      # Step 2: Build for App Store
+      ipa_path = build_for_app_store(output_name: "BudgetWise-release")
+
+      # Step 3: Upload to App Store
+      UI.header("📤 Uploading to App Store...")
+
+      # Retry wrapper for intermittent Apple CDN network failures (NSURLErrorDomain -1005)
+      max_retries = 3
+      retry_delay = 30
+      attempt = 0
+
+      begin
+        attempt += 1
+        upload_to_app_store(
+          api_key: asc_api_key,
+          ipa: ipa_path,
+          skip_metadata: true,
+          skip_screenshots: true,
+          run_precheck_before_submit: false,  # Precheck cannot check IAP with API Key auth
+          submit_for_review: false,  # ⚠️  EXPLICIT: submitting for review
+          automatic_release: false,  # Manual release from Apple
+          app_version: metadata[:tag].sub(/^v/, ''),
+          phased_release: false
+        )
+      rescue => ex
+        if attempt < max_retries && ex.message.include?("network connection was lost")
+          UI.important("⚠️  Upload failed with network error (attempt #{attempt}/#{max_retries}): #{ex.message}")
+          UI.important("⏳ Waiting #{retry_delay}s before retry...")
+          sleep(retry_delay)
+          retry
+        else
+          raise ex
+        end
+      end
+
+      UI.success("✅ App Store submission successful!")
+      UI.success("   Build: #{metadata[:tag]}")
+      UI.success("   Status: Pending Apple Review")
+
+#       notify_slack(
+#         message: "App Store release submitted: #{APP_IDENTIFIER} v#{metadata[:tag]}",
+#         success: true
+#       )
+
+    rescue => ex
+      UI.error("❌ App Store submission failed: #{ex.message}")
+#       notify_slack(
+#         message: "App Store submission FAILED: #{ex.message}",
+#         success: false
+#       )
+      raise ex
+    end
+  end
+
+  # -------------------------
+  # Utility Lanes
+  # -------------------------
+  desc "Validate setup and environment (no build)"
+  lane :validate do
+    UI.header("🔍 Validating Fastlane setup")
+    validate_environment
+
+    metadata = get_build_metadata
+    UI.success("✅ Environment validated")
+    UI.message("   Branch: #{metadata[:branch]}")
+    UI.message("   Commit: #{metadata[:commit_hash]}")
+    UI.message("   Tag: #{metadata[:tag]}")
+  end
+
+  desc "Print build metadata (no build)"
+  lane :metadata do
+    meta = get_build_metadata
+    UI.message("Branch: #{meta[:branch]}")
+    UI.message("Commit: #{meta[:commit_hash]}")
+    UI.message("Message: #{meta[:commit_message][0..100]}")
+    UI.message("Tag: #{meta[:tag]}")
+    UI.message("Timestamp: #{Time.at(meta[:timestamp]).to_s}")
+  end
+end
+
+# =======================
+# ERROR HANDLING
+# =======================
+
+error do |lane, exception|
+  UI.error("❌ Lane '#{lane}' failed with error: #{exception.message}")
+
+#   notify_slack(
+#     message: "Fastlane #{lane} failed: #{exception.message}",
+#     success: false
+#   )
+end

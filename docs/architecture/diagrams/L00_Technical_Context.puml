@@ -1,0 +1,45 @@
+@startuml L00-Technical-Context
+skinparam componentStyle uml2
+
+title Budget Wise PWA - Technical Context
+
+component "@budget/app \n" #moccasin {
+    component "React UI" as ui #lightyellow
+    component "Contexts" as ctx #lightyellow
+    component "Hooks" as hooks #lightyellow
+    interface "State API" as stateapi #white
+
+    ui ..> hooks : use
+    hooks ..> ctx : consume
+    ctx - stateapi
+}
+
+component "@budget/core \n" {
+    component "Services" as services #white
+    component "Repositories" as repos #white
+    component "Connection\nManager" as connmgr #lightblue
+    interface "Core API" as coreapi #white
+
+    coreapi - services
+    services ..> repos : use
+    repos ..> connmgr : use
+}
+
+component "Browser \n" #moccasin {
+    component "IndexedDB" as db #lightyellow
+}
+
+stateapi ..> coreapi : import
+connmgr ..> db : persist
+
+note right of ctx
+  React Context API
+  No Event Bus
+end note
+
+note right of connmgr
+  Singleton Pattern
+  Single Connection
+end note
+
+@enduml

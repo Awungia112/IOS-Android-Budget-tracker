@@ -1,0 +1,44 @@
+@startuml L02_Budget_Core
+skinparam componentStyle uml2
+
+title @budget/core - Data Layer
+
+component "Types" as types #lightyellow
+component "Services" as services #lightyellow
+component "Repositories" as repos #lightyellow
+component "Connection\nManager" as connMgr #lightblue
+component "DB Config" as dbConfig #lightyellow
+
+interface "Core API" as coreApi #white
+database "IndexedDB" as db #moccasin
+
+coreApi - services
+services ..> types : use
+services ..> repos : use
+repos ..> connMgr : use
+connMgr ..> dbConfig : use
+connMgr ..> db : persist
+
+note right of types
+  Transaction, Category,
+  Account, Limit,
+  Template, RecurringItem,
+  SavingsGoal
+end note
+
+note right of services
+  TransactionService
+  StatisticsService
+  LimitService
+  ExportService
+end note
+
+note right of repos
+  BaseRepository
+  TransactionRepo
+  CategoryRepo
+  AccountRepo
+  LimitRepo
+end note
+
+@enduml

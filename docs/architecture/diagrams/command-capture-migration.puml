@@ -1,0 +1,52 @@
+@startuml Command_Capture_Migration
+skinparam componentStyle uml2
+skinparam defaultFontSize 12
+skinparam packagePadding 20
+
+title Write Path - Before and After
+
+' ── Before ──────────────────────────────────────
+
+package "Before" as before {
+
+    component "BudgetContext" as ctx1
+
+    component "Repositories" as repos1
+    component "Bypass Paths" as bypass1 #lightyellow
+
+    database "IndexedDB" as db1
+
+    ctx1 -down-> repos1 : direct
+    ctx1 -down-> bypass1 : untracked
+    repos1 -down-> db1 : persist
+    bypass1 -down-> db1 : raw calls
+}
+
+note bottom of bypass1
+  deleteAccountWithCascade
+  resetDatabase
+end note
+
+' ── After ───────────────────────────────────────
+
+package "After" as after {
+
+    component "BudgetContext" as ctx2
+
+    component "BudgetService" as svc2 #lightyellow
+
+    component "Repositories" as repos2
+    component "ChangeLog" as log2 #lightyellow
+
+    database "IndexedDB" as db2
+
+    ctx2 -down-> svc2 : write
+    svc2 -down-> repos2 : apply
+    svc2 -down-> log2 : append
+    repos2 -down-> db2 : persist
+    log2 -down-> db2 : persist
+}
+
+before -[hidden]right- after
+
+@enduml

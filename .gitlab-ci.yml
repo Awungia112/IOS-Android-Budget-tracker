@@ -1,0 +1,1649 @@
+# GitLab CI/CD Pipeline for Budget Wise PWA
+# Deploys to Cloudflare Pages
+# Uses pnpm + Nx monorepo
+
+# ==============================================================================
+# SECURITY TEMPLATES
+# ==============================================================================
+# GitLab-managed SAST (semgrep analyzer, auto-detects TypeScript) and Secret
+# Detection jobs. Both run in the 'security' stage on every MR and branch push.
+# Findings appear in the pipeline Security tab (Free tier). The MR security
+# widget requires GitLab Ultimate.
+
+include:
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+
+# ==============================================================================
+# WORKFLOW RULES
+# ==============================================================================
+# Ensures branch pipelines run for main/develop pushes alongside MR pipelines.
+# Without this, GitLab may only create MR pipelines, skipping jobs that require
+# $CI_COMMIT_BRANCH == "main" (like push-server-image).
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_COMMIT_BRANCH == "qa"
+    - if: $CI_COMMIT_TAG
+
+# ==============================================================================
+# YAML ANCHORS
+# ==============================================================================
+
+# Base setup for Android Fastlane jobs.
+# NOTE: Jobs using this anchor must NOT redefine before_script,
+# as YAML merge does not deep-merge arrays — the local key would win.
+# Instead, extend setup steps inside the script section or use extends:.
+.android-fastlane-setup: &android-fastlane-setup
+  image: ruby:3.2
+  before_script:
+    - gem install fastlane --no-document
+    - |
+      if [ -z "$GOOGLE_PLAY_JSON_KEY" ]; then
+      echo "FATAL: GOOGLE_PLAY_JSON_KEY is not set in GitLab CI Variables" >&2
+      exit 1
+      fi
+    # Decode the Play Store service account key
+    - echo "$GOOGLE_PLAY_JSON_KEY" | tr -d '[:space:]' | base64 -d > $CI_PROJECT_DIR/google-play-key.json
+    # Export the path so Fastlane's GOOGLE_PLAY_JSON_KEY_PATH resolves correctly
+    - export GOOGLE_PLAY_JSON_KEY_PATH="$CI_PROJECT_DIR/google-play-key.json"
+    # Export the AAB path so Fastlane's ANDROID_AAB_PATH resolves correctly
+    - export ANDROID_AAB_PATH="$CI_PROJECT_DIR/android/app/build/outputs/bundle/release/app-release.aab"
+    # Export the APK path so Fastlane's ANDROID_APK_PATH resolves correctly (legacy APK track)
+    - export ANDROID_APK_PATH="$CI_PROJECT_DIR/android/app/build/outputs/apk/release/app-release.apk"
+    # Set package name (add ANDROID_PACKAGE_NAME to GitLab CI/CD variables too)
+    - export ANDROID_PACKAGE_NAME="${ANDROID_PACKAGE_NAME}"
+
+# ==============================================================================
+# PIPELINE STRUCTURE
+# ==============================================================================
+
+stages:
+  - install
+  - quality
+  - build
+  - package
+  - deploy
+
+variables:
+  NODE_VERSION: "24"
+  PNPM_VERSION: "9"
+  CF_PROJECT_NAME: "budget-wise-pwa"
+  PNPM_CACHE_FOLDER: .pnpm-store
+  # Exclude dependency store and build output directories from SAST scanning.
+  # These contain third-party package source files, not application code.
+  SAST_EXCLUDED_PATHS: "spec, test, tests, tmp, .pnpm-store, node_modules, dist"
+  # Default parallelism ceiling for Nx jobs
+  NX_PARALLEL_MAX: "4"
+  # Prevent Playwright from downloading browser binaries during pnpm install.
+  # The e2e job uses mcr.microsoft.com/playwright which has browsers pre-installed.
+  # Without this, every job that runs pnpm install would download ~340MB of browsers.
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+# Cache pnpm store between pipelines.
+# Key is based on the lockfile hash — shared across all branches with the same
+# dependency tree, so cache is warm on the first run of any new branch.
+cache:
+  key:
+    files:
+      - pnpm-lock.yaml
+  fallback_keys:
+    - pnpm-lock-fallback-${NODE_VERSION}
+  paths:
+    - .pnpm-store/
+
+# YAML anchor for Nx-based jobs
+.nx-setup: &nx-setup
+  before_script:
+    - apk add --no-cache git
+    - git fetch origin develop --depth=1
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+
+.aws-ecr-docker-job:
+  stage: deploy
+  image: docker:latest
+  tags: [aws-2xlarge]
+  services:
+    - docker:dind
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://git.adorsys.de
+  variables:
+    GITLAB_OIDC_TOKEN_FILE: $CI_PROJECT_DIR/.oidc_token
+    AWS_DEFAULT_REGION: eu-central-1
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_DRIVER: overlay2
+  before_script:
+    - echo "$GITLAB_OIDC_TOKEN" > "$GITLAB_OIDC_TOKEN_FILE"
+    - apk add --no-cache aws-cli
+    - |
+      assume_aws_role() {
+        unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+        aws_sts_output=$(aws sts assume-role-with-web-identity \
+          --role-arn "$1" \
+          --role-session-name "GitLabRunner-${CI_PROJECT_ID}-${CI_PIPELINE_ID}" \
+          --web-identity-token file://${GITLAB_OIDC_TOKEN_FILE} \
+          --duration-seconds 3600 \
+          --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+          --output text)
+        export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s" $aws_sts_output)
+      }
+
+      ecr_login() {
+        aws ecr get-login-password --region "$AWS_DEFAULT_REGION" \
+          | docker login --username AWS --password-stdin "$1"
+      }
+  after_script:
+    - rm -f "$GITLAB_OIDC_TOKEN_FILE"
+
+# ==============================================================================
+# SAST & SECRET DETECTION (template overrides)
+# ==============================================================================
+# The SAST and Secret Detection templates default all jobs to stage: test.
+# Since this pipeline uses custom stage names, every concrete template job
+# that references the test stage must be explicitly overridden to point at
+# the security stage. Hidden jobs (prefixed with .) do not trigger the stage
+# validator and do not need overriding.
+#
+# Concrete jobs overridden:
+#   sast             -- parent job defined by SAST template, stage: test
+#   semgrep-sast     -- the only SAST analyzer that runs for TypeScript
+#   secret_detection -- Secret Detection concrete job
+#
+# Reference: https://docs.gitlab.com/ee/user/application_security/detect/security_configuration
+
+sast:
+  stage: quality
+
+semgrep-sast:
+  stage: quality
+  needs: []
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+secret_detection:
+  stage: quality
+  needs: []
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+# ==============================================================================
+# INSTALL
+# ==============================================================================
+
+install:
+  stage: install
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  interruptible: true
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - pnpm config set store-dir $PNPM_CACHE_FOLDER
+  script:
+    - pnpm install --frozen-lockfile
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  artifacts:
+    paths:
+      - node_modules/
+      - packages/*/node_modules/
+    # 2 hours gives queued quality jobs enough runway even under runner contention
+    expire_in: 2 hours
+
+# ==============================================================================
+# AI REVIEW (Snif — replaces Qodo Merge / PR-Agent)
+# ==============================================================================
+# Posts inline MR discussions with code review findings.
+# Auto-detects GitLab from CI_PROJECT_PATH and CI_MERGE_REQUEST_IID.
+# allow_failure: true so a flaky AI endpoint never blocks a merge.
+
+snif_review:
+  stage: quality
+  image: debian:bookworm-slim
+  tags: [aws-2xlarge]
+  needs: []
+  allow_failure: true
+  interruptible: true
+  resource_group: ai_review
+  timeout: 30m
+  variables:
+    SNIF_VERSION: "3.3.0"
+    SNIF_API_KEY: $KIVOYO_AI_KEY
+    SNIF_ENDPOINT: $KIVOYO_AI_URL
+    GITLAB_TOKEN: $GITLAB_PERSONAL_ACCESS_TOKEN
+    RUST_LOG: info
+  before_script:
+    - apt-get update && apt-get install -y curl git xz-utils ca-certificates sqlite3
+    - curl -sSLf "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64" -o /usr/local/bin/cosign && chmod +x /usr/local/bin/cosign
+    - curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-cli-x86_64-unknown-linux-gnu.tar.xz" -O
+    - curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-cli-x86_64-unknown-linux-gnu.tar.xz.sha256" -O
+    - curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-cli-x86_64-unknown-linux-gnu.tar.xz.sha256.sig" -O
+    - curl -sSLf "https://github.com/AssahBismarkabah/Snif/releases/download/v${SNIF_VERSION}/snif-cli-x86_64-unknown-linux-gnu.tar.xz.sha256.pem" -O
+    - cosign verify-blob snif-cli-x86_64-unknown-linux-gnu.tar.xz.sha256
+        --signature snif-cli-x86_64-unknown-linux-gnu.tar.xz.sha256.sig
+        --certificate snif-cli-x86_64-unknown-linux-gnu.tar.xz.sha256.pem
+        --certificate-identity "https://github.com/AssahBismarkabah/Snif/.github/workflows/sign-release.yml@refs/heads/main"
+        --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+    - sha256sum -c snif-cli-x86_64-unknown-linux-gnu.tar.xz.sha256
+    - tar xJf snif-cli-x86_64-unknown-linux-gnu.tar.xz
+    - mv snif-cli-x86_64-unknown-linux-gnu/snif /usr/local/bin/snif
+  cache:
+    key: snif-${SNIF_VERSION}-deepseek-v4-flash
+    paths:
+      - .snif/
+  script:
+    - test -f .snif/index.db && sqlite3 .snif/index.db 'SELECT COUNT(*) AS summaries FROM summaries;' || true
+    - snif index --path .
+    - test -f .snif/index.db && sqlite3 .snif/index.db 'SELECT COUNT(*) AS summaries FROM summaries;' || true
+    - snif review --path .
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ==============================================================================
+# QUALITY
+# ==============================================================================
+
+lint:
+  stage: quality
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  interruptible: true
+  extends: .nx-setup
+  script:
+    - |
+      PARALLEL=$(nproc 2>/dev/null || echo 3)
+      [ "$PARALLEL" -gt "$NX_PARALLEL_MAX" ] && PARALLEL=$NX_PARALLEL_MAX
+      npx nx run-many -t lint --parallel=$PARALLEL
+  needs:
+    - install
+  allow_failure: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+test:
+  stage: quality
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  interruptible: true
+  extends: .nx-setup
+  script:
+    - |
+      set -e
+      export NODE_OPTIONS="--max-old-space-size=4096"
+      export NX_DAEMON=false
+      export NX_VERBOSE_LOGGING=false
+      git fetch origin develop --depth=1
+      mkdir -p coverage
+
+      PARALLEL=$(nproc 2>/dev/null || echo 3)
+      [ "$PARALLEL" -gt "$NX_PARALLEL_MAX" ] && PARALLEL=$NX_PARALLEL_MAX
+
+      # Run tests. nx affected exits 0 even when no tasks match, which silently
+      # skips all tests — so we always use run-many to ensure nothing is missed.
+      set +e
+      npx nx run-many -t test --parallel=$PARALLEL
+      TEST_EXIT=$?
+      set -e
+
+      # Generate coverage separately so an OOM during report writing does not
+      # fail the test job. Artifacts are uploaded with when:always.
+      set +e
+      npx vitest run --coverage --reporter=dot
+      set -e
+
+      # Ensure coverage dir has at least a placeholder so artifact upload works.
+      if [ -z "$(ls -A coverage 2>/dev/null)" ]; then
+        echo '{"note":"no coverage data generated"}' > coverage/.coverage-placeholder
+      fi
+
+      exit $TEST_EXIT
+    - install
+  allow_failure: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  artifacts:
+    when: always
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/**/cobertura-coverage.xml
+    paths:
+      - coverage/
+    expire_in: 1 week
+
+test:integration:
+  stage: quality
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  interruptible: true
+  extends: .nx-setup
+  script:
+    - |
+      set -e
+      export NODE_OPTIONS="--max-old-space-size=4096"
+      export NX_DAEMON=false
+      export NX_VERBOSE_LOGGING=false
+      # Integration tests must not inherit deployed environment URLs from
+      # GitLab variables; otherwise MSW can pass through to DEV/QA APIs.
+      export VITE_API_BASE_URL=""
+      export VITE_RECOVERY_SERVER_URL=""
+      export VITE_EMAIL_HASH_PEPPER=""
+      npx nx run-many -t test:integration --parallel=3
+  needs:
+    - install
+  allow_failure: false
+  timeout: 10m
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/integration/**/cobertura-coverage.xml
+      junit: coverage/integration/**/junit.xml
+    paths:
+      - coverage/integration
+    expire_in: 1 week
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+test:schema:
+  stage: quality
+  image: node:${NODE_VERSION}-alpine
+  interruptible: true
+  script:
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - pnpm install --frozen-lockfile --prefer-offline --reporter=silent
+    - pnpm run test:schema
+  needs:
+    - install
+  allow_failure: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+e2e:
+  stage: build
+  image: mcr.microsoft.com/playwright:v1.59.1-jammy
+  tags: [aws-2xlarge]
+  interruptible: true
+  timeout: 25m
+  parallel: 8
+  needs:
+    - install
+    - build   # provides dist/ and packages/*/dist/ — vite preview serves these directly
+  before_script:
+    - npm install -g pnpm@${PNPM_VERSION}
+    - pnpm config set store-dir $PNPM_CACHE_FOLDER
+  script:
+    # Optimization: reused node_modules from 'install' job (glibc-compatible).
+    # The Playwright image already contains matching browser binaries, so the
+    # app postinstall skips browser downloads in CI.
+    - pnpm install --frozen-lockfile --prefer-offline --reporter=silent
+    # Fallback build: if build job skipped @budget/app (affected detection), build it now.
+    # This ensures dist/ exists for vite preview even on CI-only or docs-only MRs.
+    - |
+      if [ ! -d "packages/app/dist" ] || [ -z "$(ls -A packages/app/dist 2>/dev/null)" ]; then
+        echo "WARNING: dist/ missing or empty — building @budget/shared, @budget/core then @budget/app (slow path)"
+        export VITE_API_BASE_URL="${VITE_API_BASE_URL:-}"
+        export VITE_RECOVERY_SERVER_URL="${VITE_RECOVERY_SERVER_URL:-}"
+        export VITE_EMAIL_HASH_PEPPER="${VITE_EMAIL_HASH_PEPPER:-}"
+        export VITE_ENABLE_REMEDIATION_PHASE2="${VITE_ENABLE_REMEDIATION_PHASE2:-}"
+        pnpm --filter @budget/shared run build
+        pnpm --filter @budget/core run build
+        pnpm --filter @budget/app run build
+      else
+        echo "dist/ found — using build artifact"
+      fi
+    # playwright.config.ts webServer runs 'vite preview' which serves dist/ directly.
+    # Call playwright directly (not via pnpm script) so --shard flag is not escaped by pnpm.
+    - cd packages/app && pnpm exec playwright test --shard=${CI_NODE_INDEX}/${CI_NODE_TOTAL}
+  artifacts:
+    paths:
+      - packages/app/playwright-report/
+      - packages/app/test-results/
+    when: always
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+lighthouse:
+  stage: build
+  tags: [aws-2xlarge]
+  interruptible: true
+  timeout: 15m
+  # Cypress browsers image chosen for Lighthouse CI because:
+  # - Pre-installed with Chrome, Node, and all necessary system libraries
+  # - Stable, well-maintained image specifically designed for browser testing
+  # - Includes proper Chrome versions compatible with Lighthouse
+  # - Alternative: official lighthouse-ci/lighthouseci image (smaller, more focused)
+  image: cypress/browsers:node-24.15.0-chrome-148.0.7778.96-1-ff-150.0.3-edge-148.0.3967.54-1
+  needs:
+    - install
+    - build   # provides dist/ — lighthouserc.cjs startServerCommand runs 'vite preview' which serves dist/
+  variables:
+    # Use the pnpm store from your global cache
+    PNPM_HOME: ".pnpm-store"
+    # Comprehensive set of flags for running Chrome as root in CI
+    LHCI_COLLECT_CHROME_FLAGS: "--no-sandbox --disable-dev-shm-usage --headless=new --disable-gpu --disable-software-rasterizer"
+    # Some versions/environments respond to this variant
+    CHROME_FLAGS: "--no-sandbox --disable-dev-shm-usage --headless=new"
+  before_script:
+    - npm install -g pnpm@${PNPM_VERSION}
+    - pnpm config set store-dir $PNPM_CACHE_FOLDER
+  script:
+    # Optimization: reused node_modules from 'install' job (glibc-compatible)
+    - pnpm install --frozen-lockfile --prefer-offline --reporter=silent
+    # Fallback build: if build job skipped @budget/app (affected detection), build it now.
+    # This ensures dist/ exists for vite preview even on CI-only or docs-only MRs.
+    - |
+      if [ ! -d "packages/app/dist" ] || [ -z "$(ls -A packages/app/dist 2>/dev/null)" ]; then
+        echo "WARNING: dist/ missing or empty — building @budget/shared, @budget/core then @budget/app (slow path)"
+        pnpm --filter @budget/shared run build
+        pnpm --filter @budget/core run build
+        pnpm --filter @budget/app run build
+      else
+        echo "dist/ found — using build artifact"
+      fi
+    # lighthouserc.cjs startServerCommand runs 'vite preview' which serves dist/ directly.
+    - cd packages/app && pnpm exec lhci autorun --collect.settings.chromeFlags="--no-sandbox --disable-dev-shm-usage --headless=new"
+  artifacts:
+    paths:
+      - packages/app/.lighthouseci/
+    # If the job fails (assertion error), we still want the report
+    when: always
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+dependency-audit:
+  stage: quality
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  needs: [install]
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+  script:
+    - pnpm audit --audit-level=high
+  # TODO: Set allow_failure: false once existing vulnerabilities are resolved
+  # This prevents blocking MRs while we address current security issues
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+trivy-scan:
+  stage: quality
+  tags: [aws-2xlarge]
+  needs: [install]
+  # Trivy DB cache is keyed by version only (not branch) so all branches share
+  # the same downloaded vulnerability database — avoids re-downloading per branch.
+  cache:
+    key: trivy-db-0.69.3
+    paths:
+      - .cache/trivy
+  image:
+    name: aquasec/trivy:0.69.3
+    entrypoint: [""]
+  script:
+    - mkdir -p .cache/trivy
+    - trivy filesystem --severity HIGH,CRITICAL --format json --output trivy-report.json --cache-dir .cache/trivy --exit-code 0 .
+    # Optimized: convert JSON to table instead of re-scanning filesystem
+    - trivy convert --format table --exit-code 1 trivy-report.json
+  artifacts:
+    when: always
+    paths:
+      - trivy-report.json
+    expire_in: 1 week
+  # TODO: Set allow_failure: false once existing vulnerabilities are resolved
+  # This prevents blocking releases while we address current security issues
+  allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
+
+# ------------------------------
+# Build Application
+# ------------------------------
+build:
+  stage: build
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  interruptible: true
+  extends: .nx-setup
+  script:
+    # Build all packages. We use run-many instead of affected because:
+    # - nx affected exits 0 when no tasks match (e.g. on the branch used as --base),
+    #   which silently skips the entire build and deploys an empty dist/ to Cloudflare Pages.
+    # - With only 4 build targets (core, app, server, recovery-server), the affected
+    #   optimization saves negligible time and breaks deployments.
+    #
+    # VITE_* variables come from GitLab CI/CD variables (set with * scope so all
+    # pipelines have them). Deploy jobs rebuild the PWA with environment-specific
+    # values, but this build needs them too for integration/e2e tests.
+    - |
+      PARALLEL=$(nproc 2>/dev/null || echo 3)
+      [ "$PARALLEL" -gt "$NX_PARALLEL_MAX" ] && PARALLEL=$NX_PARALLEL_MAX
+      export VITE_API_BASE_URL="${VITE_API_BASE_URL:-}"
+      export VITE_RECOVERY_SERVER_URL="${VITE_RECOVERY_SERVER_URL:-}"
+      export VITE_EMAIL_HASH_PEPPER="${VITE_EMAIL_HASH_PEPPER:-}"
+      export VITE_ENABLE_REMEDIATION_PHASE2="${VITE_ENABLE_REMEDIATION_PHASE2:-}"
+      npx nx run-many -t build --parallel=$PARALLEL
+  artifacts:
+    paths:
+      - dist/
+      - packages/*/dist/
+    expire_in: 1 week
+  needs:
+    - install
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+typecheck:
+  stage: build
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  interruptible: true
+  extends: .nx-setup
+  script:
+    - npx nx run-many -t typecheck
+  needs:
+    - install
+    - build
+  allow_failure: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+# Build PWA specifically for mobile packaging - Staging environment
+build:mobile:staging:
+  stage: build
+  image: node:${NODE_VERSION}
+  tags: [aws-2xlarge]
+  interruptible: true
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - pnpm config set store-dir $PNPM_CACHE_FOLDER
+  needs:
+    - install
+  script:
+    # node_modules from 'install' are glibc-compatible; simple prune/check is enough
+    - pnpm install --frozen-lockfile --prefer-offline --reporter=silent
+    - echo "=== Mobile build env ==="
+    - echo "VITE_API_BASE_URL=${VITE_API_BASE_URL:-<unset>}"
+    - echo "VITE_RECOVERY_SERVER_URL=${VITE_RECOVERY_SERVER_URL:-<unset>}"
+    - echo "VITE_EMAIL_HASH_PEPPER=${VITE_EMAIL_HASH_PEPPER:+<set>}"
+    - echo "VITE_ENABLE_REMEDIATION_PHASE2=${VITE_ENABLE_REMEDIATION_PHASE2:-<unset>}"
+    - echo "CAPACITOR_SERVER_HOSTNAME=${CAPACITOR_SERVER_HOSTNAME:-<unset>}"
+    - export VITE_API_BASE_URL="${VITE_API_BASE_URL:-https://api.prod.dip.on.adorsys.com}"
+    - export VITE_RECOVERY_SERVER_URL="${VITE_RECOVERY_SERVER_URL:-https://recovery.prod.dip.on.adorsys.com}"
+    - export VITE_EMAIL_HASH_PEPPER="${VITE_EMAIL_HASH_PEPPER:-}"
+    # Non-prod mobile builds validate detect-and-act; override via CI/CD variable if needed.
+    - export VITE_ENABLE_REMEDIATION_PHASE2="${VITE_ENABLE_REMEDIATION_PHASE2:-true}"
+    - export CAPACITOR_SERVER_HOSTNAME="${CAPACITOR_SERVER_HOSTNAME:-app.prod.dip.on.adorsys.com}"
+    - echo "Resolved build values:"
+    - echo "  VITE_API_BASE_URL=$VITE_API_BASE_URL"
+    - echo "  VITE_RECOVERY_SERVER_URL=$VITE_RECOVERY_SERVER_URL"
+    - echo "  VITE_ENABLE_REMEDIATION_PHASE2=$VITE_ENABLE_REMEDIATION_PHASE2"
+    - echo "  CAPACITOR_SERVER_HOSTNAME=$CAPACITOR_SERVER_HOSTNAME"
+    - pnpm --filter @budget/shared run build
+    - pnpm --filter @budget/core run build
+    - pnpm --filter @budget/app run build
+    - echo "=== Built bundle URL check ==="
+    - grep -R -o "https://[^\"']*" dist/assets/*.js | grep -E "api|recovery" | head -10 || true
+  artifacts:
+    paths:
+      - dist/
+      - package.json
+      - capacitor.config.ts
+    expire_in: 2 hours
+  environment:
+    name: staging
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-test-\d+$/
+
+# Build PWA specifically for mobile packaging - QA environment
+build:mobile:qa:
+  stage: build
+  image: node:${NODE_VERSION}
+  tags: [aws-2xlarge]
+  interruptible: true
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - pnpm config set store-dir $PNPM_CACHE_FOLDER
+  needs:
+    - install
+  script: |
+    pnpm install --frozen-lockfile --prefer-offline --reporter=silent
+    export VITE_API_BASE_URL="${VITE_API_BASE_URL}"
+    export VITE_RECOVERY_SERVER_URL="${VITE_RECOVERY_SERVER_URL}"
+    export VITE_EMAIL_HASH_PEPPER="${VITE_EMAIL_HASH_PEPPER}"
+    export VITE_ENABLE_REMEDIATION_PHASE2="${VITE_ENABLE_REMEDIATION_PHASE2:-true}"
+    export CAPACITOR_SERVER_HOSTNAME="${CAPACITOR_SERVER_HOSTNAME}"
+    echo "Building for QA environment"
+    echo "VITE_API_BASE_URL: $VITE_API_BASE_URL"
+    echo "VITE_RECOVERY_SERVER_URL: $VITE_RECOVERY_SERVER_URL"
+    echo "VITE_ENABLE_REMEDIATION_PHASE2: $VITE_ENABLE_REMEDIATION_PHASE2"
+    echo "CAPACITOR_SERVER_HOSTNAME: $CAPACITOR_SERVER_HOSTNAME"
+    pnpm build
+  artifacts:
+    paths:
+      - dist/
+      - package.json
+      - capacitor.config.ts
+    expire_in: 2 hours
+  environment:
+    name: qa
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-qa\.\d+$/
+
+# Build PWA specifically for mobile packaging - Production environment
+build:mobile:production:
+  stage: build
+  image: node:${NODE_VERSION}
+  tags: [aws-2xlarge]
+  interruptible: true
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - pnpm config set store-dir $PNPM_CACHE_FOLDER
+  needs:
+    - install
+  script: |
+    pnpm install --frozen-lockfile --prefer-offline --reporter=silent
+    export VITE_API_BASE_URL="${VITE_API_BASE_URL:-https://api.prod.dip.on.adorsys.com}"
+    export VITE_RECOVERY_SERVER_URL="${VITE_RECOVERY_SERVER_URL:-https://recovery.prod.dip.on.adorsys.com}"
+    export VITE_EMAIL_HASH_PEPPER="${VITE_EMAIL_HASH_PEPPER:-}"
+    # Production ships Phase 1 (detect-only) by default per staged rollout.
+    # Phase 2 (detect-and-act) will be enabled after Phase 1 telemetry validates
+    # the threshold. Set VITE_ENABLE_REMEDIATION_PHASE2=true to enable Phase 2.
+    export VITE_ENABLE_REMEDIATION_PHASE2="${VITE_ENABLE_REMEDIATION_PHASE2:-false}"
+    export CAPACITOR_SERVER_HOSTNAME="${CAPACITOR_SERVER_HOSTNAME:-app.prod.dip.on.adorsys.com}"
+    echo "Building for Production environment"
+    echo "VITE_API_BASE_URL: $VITE_API_BASE_URL"
+    echo "VITE_RECOVERY_SERVER_URL: $VITE_RECOVERY_SERVER_URL"
+    echo "VITE_ENABLE_REMEDIATION_PHASE2: ${VITE_ENABLE_REMEDIATION_PHASE2:-false (Phase 1)}"
+    echo "CAPACITOR_SERVER_HOSTNAME: $CAPACITOR_SERVER_HOSTNAME"
+    pnpm build
+  artifacts:
+    paths:
+      - dist/
+      - package.json
+      - capacitor.config.ts
+    expire_in: 2 hours
+  environment:
+    name: production
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+# ==============================================================================
+# PACKAGE
+# ==============================================================================
+
+package:android:
+  stage: package
+  tags: [aws-2xlarge]
+  needs:
+    - build:mobile:staging
+  image: thyrlian/android-sdk:latest
+  variables:
+    JAVA_HOME: /usr/lib/jvm/java-21-openjdk-amd64
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y openjdk-21-jdk curl
+    - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    - apt-get install -y nodejs
+    # FIX: Use corepack consistently
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - |
+      if [ -z "$GOOGLE_PLAY_SIGNING_KEYSTORE_BASE64" ]; then
+        echo "FATAL: GOOGLE_PLAY_SIGNING_KEYSTORE_BASE64 is not set" >&2
+        exit 1
+      fi
+    - |
+      set -e
+      echo "$GOOGLE_PLAY_SIGNING_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$CI_PROJECT_DIR/android-signing-keystore.jks"
+      if [ ! -s "$CI_PROJECT_DIR/android-signing-keystore.jks" ]; then
+        echo "FATAL: Keystore decode produced empty file — check GOOGLE_PLAY_SIGNING_KEYSTORE_BASE64" >&2
+        exit 1
+      fi
+    # Verify keystore is valid before proceeding
+    - keytool -list -keystore $CI_PROJECT_DIR/android-signing-keystore.jks -storepass $KEYSTORE_PASSWORD -noprompt
+    - export KEYSTORE_PATH="$CI_PROJECT_DIR/android-signing-keystore.jks"
+    - echo "Environment:" && node --version && pnpm --version && java -version
+    - echo "=== Android package env ==="
+    - echo "VITE_API_BASE_URL=${VITE_API_BASE_URL:-<unset>}"
+    - echo "VITE_RECOVERY_SERVER_URL=${VITE_RECOVERY_SERVER_URL:-<unset>}"
+    - echo "CAPACITOR_SERVER_HOSTNAME=${CAPACITOR_SERVER_HOSTNAME:-<unset>}"
+    - export CAPACITOR_SERVER_HOSTNAME="${CAPACITOR_SERVER_HOSTNAME:-app.prod.dip.on.adorsys.com}"
+    - echo "Resolved Android package values:"
+    - echo "  CAPACITOR_SERVER_HOSTNAME=$CAPACITOR_SERVER_HOSTNAME"
+  script:
+    - pnpm install --frozen-lockfile
+    - pnpm exec cap sync android
+    - |
+      set -e
+      # 1. Ensure the tag exists
+      if [ -z "$CI_COMMIT_TAG" ]; then
+        echo "FATAL: CI_COMMIT_TAG is not set. This job must be triggered by a tag." >&2
+        exit 1
+      fi
+
+      # 2. Validate format (e.g., v1.2.3 or v1.2.3-test)
+      # Using POSIX grep -qE instead of bash [[ =~ ]] — thyrlian/android-sdk may use sh
+      if ! echo "$CI_COMMIT_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-.*)?$'; then
+        echo "FATAL: Tag '$CI_COMMIT_TAG' does not match versioning schema (vX.Y.Z)." >&2
+        exit 1
+      fi
+
+      # 3. Strip the 'v' prefix and build — all in the same shell so VERSION_NAME is in scope
+      VERSION_NAME="${CI_COMMIT_TAG#v}"
+      VERSION_CODE="$((VERSION_CODE_OFFSET + CI_PIPELINE_IID))"
+      echo "Building Version: $VERSION_NAME (code: $VERSION_CODE)"
+      cd android
+      ./gradlew clean bundleRelease assembleRelease \
+        -PVERSION_CODE="$VERSION_CODE" \
+        -PVERSION_NAME="$VERSION_NAME" \
+        --no-daemon
+  artifacts:
+    paths:
+      - android/app/build/outputs/bundle/release/app-release.aab
+      - android/app/build/outputs/apk/release/app-release.apk
+    expire_in: 1 week
+  after_script:
+    # FIX: Use full path — working dir in after_script is not guaranteed to be CI_PROJECT_DIR
+    - rm -f $CI_PROJECT_DIR/android-signing-keystore.jks
+  rules:
+    # Run on test tags only
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-test-\d+$/
+
+package:android:qa:
+  stage: package
+  tags: [aws-2xlarge]
+  needs:
+    - build:mobile:qa
+  image: thyrlian/android-sdk:latest
+  variables:
+    JAVA_HOME: /usr/lib/jvm/java-21-openjdk-amd64
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y openjdk-21-jdk curl
+    - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    - apt-get install -y nodejs
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - |
+      if [ -z "$GOOGLE_PLAY_SIGNING_KEYSTORE_BASE64" ]; then
+        echo "FATAL: GOOGLE_PLAY_SIGNING_KEYSTORE_BASE64 is not set" >&2
+        exit 1
+      fi
+    - |
+      set -e
+      echo "$GOOGLE_PLAY_SIGNING_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$CI_PROJECT_DIR/android-signing-keystore.jks"
+      if [ ! -s "$CI_PROJECT_DIR/android-signing-keystore.jks" ]; then
+        echo "FATAL: Keystore decode produced empty file" >&2
+        exit 1
+      fi
+    - keytool -list -keystore $CI_PROJECT_DIR/android-signing-keystore.jks -storepass $KEYSTORE_PASSWORD -noprompt
+    - export KEYSTORE_PATH="$CI_PROJECT_DIR/android-signing-keystore.jks"
+    - echo "Environment:" && node --version && pnpm --version && java -version
+    - echo "CAPACITOR_SERVER_HOSTNAME=${CAPACITOR_SERVER_HOSTNAME:-<unset>}"
+    - export CAPACITOR_SERVER_HOSTNAME="${CAPACITOR_SERVER_HOSTNAME:-app.qa.dip.on.adorsys.com}"
+    - echo "Resolved Android QA package values:"
+    - echo "  CAPACITOR_SERVER_HOSTNAME=$CAPACITOR_SERVER_HOSTNAME"
+  script:
+    - pnpm install --frozen-lockfile
+    - pnpm exec cap sync android
+    - |
+      set -e
+      if [ -z "$CI_COMMIT_TAG" ]; then
+        echo "FATAL: CI_COMMIT_TAG is not set" >&2
+        exit 1
+      fi
+      if ! echo "$CI_COMMIT_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-.*)?$'; then
+        echo "FATAL: Tag '$CI_COMMIT_TAG' does not match versioning schema" >&2
+        exit 1
+      fi
+      VERSION_NAME="${CI_COMMIT_TAG#v}"
+      VERSION_CODE="$((VERSION_CODE_OFFSET + CI_PIPELINE_IID))"
+      echo "Building Version: $VERSION_NAME (code: $VERSION_CODE)"
+      cd android
+      ./gradlew clean bundleRelease assembleRelease \
+        -PVERSION_CODE="$VERSION_CODE" \
+        -PVERSION_NAME="$VERSION_NAME" \
+        --no-daemon
+  artifacts:
+    paths:
+      - android/app/build/outputs/bundle/release/app-release.aab
+      - android/app/build/outputs/apk/release/app-release.apk
+    expire_in: 1 week
+  after_script:
+    - rm -f $CI_PROJECT_DIR/android-signing-keystore.jks
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-qa\.\d+$/
+
+package:android:production:
+  stage: package
+  tags: [aws-2xlarge]
+  needs:
+    - build:mobile:production
+  image: thyrlian/android-sdk:latest
+  variables:
+    JAVA_HOME: /usr/lib/jvm/java-21-openjdk-amd64
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y openjdk-21-jdk curl
+    - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    - apt-get install -y nodejs
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - |
+      if [ -z "$GOOGLE_PLAY_SIGNING_KEYSTORE_BASE64" ]; then
+        echo "FATAL: GOOGLE_PLAY_SIGNING_KEYSTORE_BASE64 is not set" >&2
+        exit 1
+      fi
+    - |
+      set -e
+      echo "$GOOGLE_PLAY_SIGNING_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$CI_PROJECT_DIR/android-signing-keystore.jks"
+      if [ ! -s "$CI_PROJECT_DIR/android-signing-keystore.jks" ]; then
+        echo "FATAL: Keystore decode produced empty file" >&2
+        exit 1
+      fi
+    - keytool -list -keystore $CI_PROJECT_DIR/android-signing-keystore.jks -storepass $KEYSTORE_PASSWORD -noprompt
+    - export KEYSTORE_PATH="$CI_PROJECT_DIR/android-signing-keystore.jks"
+    - echo "Environment:" && node --version && pnpm --version && java -version
+    - echo "CAPACITOR_SERVER_HOSTNAME=${CAPACITOR_SERVER_HOSTNAME:-<unset>}"
+    - export CAPACITOR_SERVER_HOSTNAME="${CAPACITOR_SERVER_HOSTNAME:-app.prod.dip.on.adorsys.com}"
+    - echo "Resolved Android production package values:"
+    - echo "  CAPACITOR_SERVER_HOSTNAME=$CAPACITOR_SERVER_HOSTNAME"
+  script:
+    - pnpm install --frozen-lockfile
+    - pnpm exec cap sync android
+    - |
+      set -e
+      if [ -z "$CI_COMMIT_TAG" ]; then
+        echo "FATAL: CI_COMMIT_TAG is not set" >&2
+        exit 1
+      fi
+      if ! echo "$CI_COMMIT_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+        echo "FATAL: Tag '$CI_COMMIT_TAG' does not match versioning schema" >&2
+        exit 1
+      fi
+      VERSION_NAME="${CI_COMMIT_TAG#v}"
+      VERSION_CODE="$((VERSION_CODE_OFFSET + CI_PIPELINE_IID))"
+      echo "Building Version: $VERSION_NAME (code: $VERSION_CODE)"
+      cd android
+      ./gradlew clean bundleRelease assembleRelease \
+        -PVERSION_CODE="$VERSION_CODE" \
+        -PVERSION_NAME="$VERSION_NAME" \
+        --no-daemon
+  artifacts:
+    paths:
+      - android/app/build/outputs/bundle/release/app-release.aab
+      - android/app/build/outputs/apk/release/app-release.apk
+    expire_in: 1 week
+  after_script:
+    - rm -f $CI_PROJECT_DIR/android-signing-keystore.jks
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+# ------------------------------
+# Package iOS (Simulator)
+# ------------------------------
+# Runs on: Mac runner (on-premise, GDPR compliant)
+# Tool: Capacitor + Xcode
+# Output: .app file (simulator only, no code signing)
+# Purpose: Test pipeline without Apple Developer account
+# Trigger: v*.*.*-test tags (auto) or manual on release tags
+package:ios:simulator:
+  stage: package
+  tags:
+    - macos
+    - ios
+  variables:
+    GIT_DEPTH: "0"
+  needs:
+    - job: build:mobile:staging
+      optional: true
+  before_script:
+    # NOTE: macOS Shell Executors run in non-interactive mode and ignore user profiles (~/.zshrc).
+    # We explicitly prepend the Homebrew Node@24 path to ensure Corepack and Node are found,
+    # maintaining pnpm version parity with the rest of the pipeline.
+    # Runner prerequisite: brew install node@24
+    - export PATH="/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:$PATH"
+    - echo "Node version:" && node --version
+    - echo "Xcode version:" && xcodebuild -version
+    - corepack enable
+    - |
+      if [ -z "${PNPM_VERSION}" ]; then
+        echo "Error: PNPM_VERSION is not set!"
+        exit 1
+      fi
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - export FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT=120
+    - export FASTLANE_XCODEBUILD_SETTINGS_RETRIES=6
+    - echo "CAPACITOR_SERVER_HOSTNAME=${CAPACITOR_SERVER_HOSTNAME:-<unset>}"
+    - export CAPACITOR_SERVER_HOSTNAME="${CAPACITOR_SERVER_HOSTNAME:-app.prod.dip.on.adorsys.com}"
+    - echo "Resolved iOS simulator package values:"
+    - echo "  CAPACITOR_SERVER_HOSTNAME=$CAPACITOR_SERVER_HOSTNAME"
+  script:
+    - pnpm install --frozen-lockfile
+    - pnpm exec cap sync ios
+    - fastlane ios simulator
+  artifacts:
+    paths:
+      - build/BudgetWise-simulator.app
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-test-\d+$/
+      when: manual
+
+# ------------------------------
+# Package iOS (Signed)
+# ------------------------------
+# Runs on: Mac runner (on-premise, GDPR compliant)
+# Tool: Capacitor + Xcode + Fastlane
+# Output: .ipa file (signed for App Store)
+# Requires: Apple Developer Account ($99/year)
+# Trigger: v*.*.* release tags and test tags (for TestFlight testing from feature branches)
+package:ios:
+  stage: package
+  tags:
+    - macos
+    - ios
+  variables:
+    GIT_DEPTH: "0"
+  needs:
+    - job: build:mobile:staging
+      optional: true
+  before_script:
+    # NOTE: macOS Shell Executors run in non-interactive mode and ignore user profiles (~/.zshrc).
+    # We explicitly prepend the Homebrew Node@24 path to ensure Corepack and Node are found,
+    # maintaining pnpm version parity with the rest of the pipeline.
+    # Runner prerequisite: brew install node@24
+    - export PATH="/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:$PATH"
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+    # Handle Corepack
+    - corepack enable
+    - |
+      if [ -z "${PNPM_VERSION}" ]; then
+        echo "Error: PNPM_VERSION is not set!"
+        exit 1
+      fi
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - pnpm --version
+    - xcodebuild -version
+    - echo "=== iOS package env ==="
+    - echo "VITE_API_BASE_URL=${VITE_API_BASE_URL:-<unset>}"
+    - echo "VITE_RECOVERY_SERVER_URL=${VITE_RECOVERY_SERVER_URL:-<unset>}"
+    - echo "CAPACITOR_SERVER_HOSTNAME=${CAPACITOR_SERVER_HOSTNAME:-<unset>}"
+    - export CAPACITOR_SERVER_HOSTNAME="${CAPACITOR_SERVER_HOSTNAME:-app.prod.dip.on.adorsys.com}"
+    - echo "Resolved iOS package values:"
+    - echo "  CAPACITOR_SERVER_HOSTNAME=$CAPACITOR_SERVER_HOSTNAME"
+  script:
+    - pnpm install --frozen-lockfile
+    - pnpm exec cap sync ios
+    - fastlane ios beta
+  artifacts:
+    paths:
+      - build/*.ipa
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-test-\d+$/
+
+package:ios:qa:
+  stage: package
+  tags:
+    - macos
+    - ios
+  variables:
+    GIT_DEPTH: "0"
+  needs:
+    - job: build:mobile:qa
+      optional: true
+  before_script:
+    - export PATH="/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:$PATH"
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+    - export FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT=120
+    - export FASTLANE_XCODEBUILD_SETTINGS_RETRIES=6
+    - corepack enable
+    - |
+      if [ -z "${PNPM_VERSION}" ]; then
+        echo "Error: PNPM_VERSION is not set!"
+        exit 1
+      fi
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - pnpm --version
+    - xcodebuild -version
+    - echo "CAPACITOR_SERVER_HOSTNAME=${CAPACITOR_SERVER_HOSTNAME:-<unset>}"
+    - export CAPACITOR_SERVER_HOSTNAME="${CAPACITOR_SERVER_HOSTNAME:-app.qa.dip.on.adorsys.com}"
+    - echo "Resolved iOS QA package values:"
+    - echo "  CAPACITOR_SERVER_HOSTNAME=$CAPACITOR_SERVER_HOSTNAME"
+  script:
+    - pnpm install --frozen-lockfile
+    - pnpm exec cap sync ios
+    - fastlane ios beta
+    - fastlane ios release
+  artifacts:
+    paths:
+      - build/*.ipa
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-qa\.\d+$/
+
+package:ios:production:
+  stage: package
+  tags:
+    - macos
+    - ios
+  variables:
+    GIT_DEPTH: "0"
+  needs:
+    - job: build:mobile:production
+      optional: true
+  before_script:
+    - export PATH="/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:$PATH"
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+    - export FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT=120
+    - export FASTLANE_XCODEBUILD_SETTINGS_RETRIES=6
+    - corepack enable
+    - |
+      if [ -z "${PNPM_VERSION}" ]; then
+        echo "Error: PNPM_VERSION is not set!"
+        exit 1
+      fi
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - pnpm --version
+    - xcodebuild -version
+    - echo "CAPACITOR_SERVER_HOSTNAME=${CAPACITOR_SERVER_HOSTNAME:-<unset>}"
+    - export CAPACITOR_SERVER_HOSTNAME="${CAPACITOR_SERVER_HOSTNAME:-app.prod.dip.on.adorsys.com}"
+    - echo "Resolved iOS production package values:"
+    - echo "  CAPACITOR_SERVER_HOSTNAME=$CAPACITOR_SERVER_HOSTNAME"
+  script:
+    - git fetch --unshallow || true
+    - git fetch --tags --force
+    - git fetch origin "refs/tags/${CI_COMMIT_TAG}:refs/tags/${CI_COMMIT_TAG}" || true
+    - pnpm install --frozen-lockfile
+    - pnpm exec cap sync ios
+    - fastlane ios beta
+    - fastlane ios release
+  artifacts:
+    paths:
+      - build/*.ipa
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+# ==============================================================================
+# DEPLOY — WEB
+# ==============================================================================
+
+deploy:preview:
+  stage: deploy
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  retry:
+    max: 2
+    when: script_failure
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - pnpm config set store-dir $PNPM_CACHE_FOLDER
+  script:
+    - pnpm install --frozen-lockfile --prefer-offline --reporter=silent
+    - pnpm --filter @budget/shared run build
+    - pnpm --filter @budget/core run build
+    - VITE_API_BASE_URL="${VITE_API_BASE_URL}" VITE_RECOVERY_SERVER_URL="${VITE_RECOVERY_SERVER_URL}" VITE_EMAIL_HASH_PEPPER="${VITE_EMAIL_HASH_PEPPER}" VITE_ENABLE_REMEDIATION_PHASE2="${VITE_ENABLE_REMEDIATION_PHASE2:-true}" pnpm --filter @budget/app run build
+    - npx wrangler pages deploy dist --project-name=${CF_PROJECT_NAME} --branch=${CI_COMMIT_REF_NAME}
+  environment:
+    name: preview/${CI_COMMIT_REF_NAME}
+    url: https://${CI_COMMIT_REF_SLUG}.${CF_PROJECT_NAME}.pages.dev
+    on_stop: stop:preview
+  needs:
+    - lint
+    - test
+    - typecheck
+    - test:integration
+    - e2e
+    - lighthouse
+  rules:
+    - if: '$CI_MERGE_REQUEST_ID'
+
+deploy:staging:
+  stage: deploy
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  retry:
+    max: 2
+    when: script_failure
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - pnpm config set store-dir $PNPM_CACHE_FOLDER
+  script:
+    - echo "=== Environment Variables ==="
+    - echo "VITE_API_BASE_URL=${VITE_API_BASE_URL}"
+    - echo "VITE_RECOVERY_SERVER_URL=${VITE_RECOVERY_SERVER_URL}"
+    - echo "VITE_EMAIL_HASH_PEPPER=${VITE_EMAIL_HASH_PEPPER}"
+    - echo "VITE_ENABLE_REMEDIATION_PHASE2=${VITE_ENABLE_REMEDIATION_PHASE2:-<unset>}"
+    - echo "CI_ENVIRONMENT_NAME=${CI_ENVIRONMENT_NAME}"
+    - echo "CI_COMMIT_BRANCH=${CI_COMMIT_BRANCH}"
+    - echo "=== Checking if variables contain dev domain ==="
+    - | 
+      if echo "$VITE_API_BASE_URL" | grep -q "dev.dip.on.adorsys.com"; then
+        echo "✓ VITE_API_BASE_URL contains dev domain"
+      else
+        echo "✗ VITE_API_BASE_URL does NOT contain dev domain"
+        echo "  Actual value: $VITE_API_BASE_URL"
+      fi
+    - | 
+      if echo "$VITE_RECOVERY_SERVER_URL" | grep -q "dev.dip.on.adorsys.com"; then
+        echo "✓ VITE_RECOVERY_SERVER_URL contains dev domain"
+      else
+        echo "✗ VITE_RECOVERY_SERVER_URL does NOT contain dev domain"
+        echo "  Actual value: $VITE_RECOVERY_SERVER_URL"
+      fi
+    - pnpm install --frozen-lockfile --prefer-offline --reporter=silent
+    - pnpm --filter @budget/shared run build
+    - pnpm --filter @budget/core run build
+    - VITE_API_BASE_URL="${VITE_API_BASE_URL}" VITE_RECOVERY_SERVER_URL="${VITE_RECOVERY_SERVER_URL}" VITE_EMAIL_HASH_PEPPER="${VITE_EMAIL_HASH_PEPPER}" VITE_ENABLE_REMEDIATION_PHASE2="${VITE_ENABLE_REMEDIATION_PHASE2:-true}" pnpm --filter @budget/app run build
+    - echo "=== Checking built bundle for API URLs ==="
+    - grep -o "https://api[^\"']*" dist/assets/*.js | head -3 || echo "No API URLs found in bundle"
+    - npx wrangler pages deploy dist --project-name=budget-wise-pwa-dev --branch=develop
+  environment:
+    name: staging
+    url: https://develop.${CF_PROJECT_NAME}.pages.dev
+  needs:
+    - lint
+    - test
+    - test:integration
+    - typecheck
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+deploy:qa:
+  stage: deploy
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  retry:
+    max: 2
+    when: script_failure
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - pnpm config set store-dir $PNPM_CACHE_FOLDER
+  script:
+    - pnpm install --frozen-lockfile --prefer-offline --reporter=silent
+    - pnpm --filter @budget/shared run build
+    - pnpm --filter @budget/core run build
+    - VITE_API_BASE_URL="${VITE_API_BASE_URL}" VITE_RECOVERY_SERVER_URL="${VITE_RECOVERY_SERVER_URL}" VITE_EMAIL_HASH_PEPPER="${VITE_EMAIL_HASH_PEPPER}" VITE_ENABLE_REMEDIATION_PHASE2="${VITE_ENABLE_REMEDIATION_PHASE2:-true}" pnpm --filter @budget/app run build
+    - npx wrangler pages deploy dist --project-name=budget-wise-pwa-qa --branch=qa
+  environment:
+    name: qa
+    url: https://qa.${CF_PROJECT_NAME}.pages.dev
+  needs:
+    - lint
+    - test
+    - test:integration
+    - typecheck
+  rules:
+    - if: $CI_COMMIT_BRANCH == "qa"
+
+deploy:production:
+  stage: deploy
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  retry:
+    max: 2
+    when: script_failure
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+    - pnpm config set store-dir $PNPM_CACHE_FOLDER
+  script:
+    - pnpm install --frozen-lockfile --prefer-offline --reporter=silent
+    - pnpm --filter @budget/shared run build
+    - pnpm --filter @budget/core run build
+    - export VITE_API_BASE_URL="${VITE_API_BASE_URL:-https://api.prod.dip.on.adorsys.com}"
+    - export VITE_RECOVERY_SERVER_URL="${VITE_RECOVERY_SERVER_URL:-https://recovery.prod.dip.on.adorsys.com}"
+    - export VITE_EMAIL_HASH_PEPPER="${VITE_EMAIL_HASH_PEPPER:-}"
+    - export VITE_ENABLE_REMEDIATION_PHASE2="${VITE_ENABLE_REMEDIATION_PHASE2:-false}"
+    - VITE_API_BASE_URL="$VITE_API_BASE_URL" VITE_RECOVERY_SERVER_URL="$VITE_RECOVERY_SERVER_URL" VITE_EMAIL_HASH_PEPPER="$VITE_EMAIL_HASH_PEPPER" VITE_ENABLE_REMEDIATION_PHASE2="$VITE_ENABLE_REMEDIATION_PHASE2" pnpm --filter @budget/app run build
+    - npx wrangler pages deploy dist --project-name=budget-wise-pwa-prod --branch=main
+  environment:
+    name: production
+    url: https://${CF_PROJECT_NAME}.pages.dev
+  needs:
+    - lint
+    - test
+    - typecheck
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# ==============================================================================
+# DEPLOY — ANDROID
+# ==============================================================================
+
+# FIX: before_script now lives entirely in the anchor — do NOT redefine it here.
+# YAML merge (<<:) does not deep-merge arrays; a local before_script would
+# silently replace the anchor's, skipping Java and Fastlane setup entirely.
+deploy:android:internal:
+  stage: deploy
+  tags: [aws-2xlarge]
+  extends: .android-fastlane-setup
+  needs:
+    - job: package:android
+      optional: true
+    - job: package:android:qa
+      optional: true
+    - job: package:android:production
+      optional: true
+  # FIX: removed duplicate `image: ruby:3.2` (already set by anchor)
+  # FIX: removed duplicate `gem install fastlane` from script (already in anchor)
+  script:
+    - fastlane android internal_apk
+  after_script:
+    - rm -f $CI_PROJECT_DIR/google-play-key.json
+  rules:
+    # Triggered by production tags (direct) and test pre-release tags (internal track)
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+-test-\d+$/
+
+# FIX: was completely missing google-play-key.json setup
+deploy:android:production:
+  stage: deploy
+  tags: [aws-2xlarge]
+  extends: .android-fastlane-setup
+  needs:
+    - job: package:android:production
+      optional: true
+  script:
+    - fastlane android production_apk
+  after_script:
+    - rm -f $CI_PROJECT_DIR/google-play-key.json
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: manual
+
+# ==============================================================================
+# DEPLOY — iOS
+# ==============================================================================
+
+deploy:ios:production:
+  stage: deploy
+  tags:
+    - macos
+    - ios
+  needs:
+    - job: package:ios
+      optional: true
+  before_script:
+    # Mirror the PATH and locale setup from package:ios — fastlane must be on PATH
+    # on the macOS shell executor which ignores ~/.zshrc in non-interactive mode.
+    # Runner prerequisite: brew install node@24
+    - export PATH="/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:$PATH"
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+  script:
+    - fastlane ios release
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: manual
+
+# ==============================================================================
+# DEPLOY — SERVER (AWS ECR)
+# ==============================================================================
+# Pushes the @budget/server Docker image to AWS ECR using OIDC authentication.
+# No static AWS credentials — uses GitLab id_tokens exchanged for temporary
+# STS credentials via AssumeRoleWithWebIdentity.
+#
+# Tag strategy:
+#   main → DEV ECR $CI_COMMIT_SHORT_SHA
+#   manual QA promotion → copies the same immutable tag from DEV ECR to QA ECR
+#
+# Note: The AWS IAM roles (gitlab-ecr-push-dev and gitlab-ecr-push-qa) are
+# currently restricted to the main branch only. To enable DEV/QA image flow from
+# develop, update both role trust policies to allow develop too.
+#
+# AWS prerequisites:
+#   - DEV ECR repositories: budget-wise/server and budget-wise/recovery-server
+#     in account 113008552221, eu-central-1
+#   - QA ECR repositories: budget-wise/server and budget-wise/recovery-server
+#     in account 974954696093, eu-central-1
+#   - OIDC Identity Provider for https://git.adorsys.de in both AWS accounts
+#   - IAM roles gitlab-ecr-push-dev and gitlab-ecr-push-qa with ECR permissions
+#     and a trust policy allowing AssumeRoleWithWebIdentity from the IdP
+
+.promote-image-to-qa:
+  extends: .aws-ecr-docker-job
+  variables:
+    DEV_AWS_ROLE_ARN: arn:aws:iam::113008552221:role/gitlab-ecr-push-dev
+    QA_AWS_ROLE_ARN: arn:aws:iam::974954696093:role/gitlab-ecr-push-qa
+    DEV_ECR_REGISTRY: 113008552221.dkr.ecr.eu-central-1.amazonaws.com
+    QA_ECR_REGISTRY: 974954696093.dkr.ecr.eu-central-1.amazonaws.com
+  script:
+    - export IMAGE_TAG="${PROMOTE_IMAGE_TAG:-$CI_COMMIT_SHORT_SHA}"
+    - echo "Promoting $ECR_REPOSITORY:$IMAGE_TAG from DEV ECR to QA ECR"
+    - assume_aws_role "$DEV_AWS_ROLE_ARN"
+    - |
+      SOURCE_DIGEST=$(aws ecr describe-images \
+        --repository-name "$ECR_REPOSITORY" \
+        --image-ids imageTag="$IMAGE_TAG" \
+        --query 'imageDetails[0].imageDigest' \
+        --output text 2>/dev/null || true)
+      if [ -z "$SOURCE_DIGEST" ] || [ "$SOURCE_DIGEST" = "None" ]; then
+        echo "FATAL: source image $DEV_ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG was not found" >&2
+        exit 1
+      fi
+      echo "Source digest: $SOURCE_DIGEST"
+    - ecr_login "$DEV_ECR_REGISTRY"
+    - docker pull "$DEV_ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+    - assume_aws_role "$QA_AWS_ROLE_ARN"
+    - |
+      TARGET_DIGEST=$(aws ecr describe-images \
+        --repository-name "$ECR_REPOSITORY" \
+        --image-ids imageTag="$IMAGE_TAG" \
+        --query 'imageDetails[0].imageDigest' \
+        --output text 2>/dev/null || true)
+      if [ "$TARGET_DIGEST" = "$SOURCE_DIGEST" ]; then
+        echo "QA image already exists with the same digest; nothing to promote."
+        exit 0
+      fi
+      if [ -n "$TARGET_DIGEST" ] && [ "$TARGET_DIGEST" != "None" ]; then
+        echo "FATAL: QA image tag already exists with a different digest: $TARGET_DIGEST" >&2
+        exit 1
+      fi
+    - ecr_login "$QA_ECR_REGISTRY"
+    - docker tag "$DEV_ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" "$QA_ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+    - docker push "$QA_ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+
+push-server-image:
+  extends: .aws-ecr-docker-job
+  variables:
+    AWS_ROLE_ARN: arn:aws:iam::113008552221:role/gitlab-ecr-push-dev
+    ECR_REGISTRY: 113008552221.dkr.ecr.eu-central-1.amazonaws.com
+  script:
+    - assume_aws_role "$AWS_ROLE_ARN"
+    - ecr_login "$ECR_REGISTRY"
+    # Build from monorepo root context with Dockerfile path specified
+    - docker build -t $ECR_REGISTRY/budget-wise/server:$CI_COMMIT_SHORT_SHA -f packages/server/Dockerfile .
+    # Push commit SHA tag
+    - docker push $ECR_REGISTRY/budget-wise/server:$CI_COMMIT_SHORT_SHA
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+promote-server-image:qa:
+  extends: .promote-image-to-qa
+  needs:
+    - job: push-server-image
+      optional: true
+  variables:
+    ECR_REPOSITORY: budget-wise/server
+
+# ==============================================================================
+# PROMOTE — PROD SERVER (AWS ECR)
+# ==============================================================================
+# Promotes the @budget/server Docker image from QA ECR to PROD ECR.
+# Uses OIDC authentication for AWS credentials.
+#
+# AWS prerequisites:
+#   - QA ECR repositories: budget-wise/server in account 974954696093
+#   - PROD ECR repositories: budget-wise/server in account 872353350630
+#   - OIDC Identity Provider for https://git.adorsys.de in both AWS accounts
+#   - IAM role gitlab-ecr-push-qa with ECR permissions
+#   - IAM role gitlab-ecr-push-prod with ECR permissions
+
+.promote-image-to-prod:
+  extends: .aws-ecr-docker-job
+  variables:
+    QA_AWS_ROLE_ARN: arn:aws:iam::974954696093:role/gitlab-ecr-push-qa
+    PROD_AWS_ROLE_ARN: arn:aws:iam::872353350630:role/gitlab-ecr-push-prod
+    QA_ECR_REGISTRY: 974954696093.dkr.ecr.eu-central-1.amazonaws.com
+    PROD_ECR_REGISTRY: 872353350630.dkr.ecr.eu-central-1.amazonaws.com
+  script:
+    - export IMAGE_TAG="${PROMOTE_IMAGE_TAG:-$CI_COMMIT_SHORT_SHA}"
+    - echo "Promoting $ECR_REPOSITORY:$IMAGE_TAG from QA ECR to PROD ECR"
+    - assume_aws_role "$QA_AWS_ROLE_ARN"
+    - |
+      SOURCE_DIGEST=$(aws ecr describe-images \
+        --repository-name "$ECR_REPOSITORY" \
+        --image-ids imageTag="$IMAGE_TAG" \
+        --query 'imageDetails[0].imageDigest' \
+        --output text 2>/dev/null || true)
+      if [ -z "$SOURCE_DIGEST" ] || [ "$SOURCE_DIGEST" = "None" ]; then
+        echo "FATAL: source image $QA_ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG was not found" >&2
+        exit 1
+      fi
+      echo "Source digest: $SOURCE_DIGEST"
+    - ecr_login "$QA_ECR_REGISTRY"
+    - docker pull "$QA_ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+    - assume_aws_role "$PROD_AWS_ROLE_ARN"
+    - |
+      TARGET_DIGEST=$(aws ecr describe-images \
+        --repository-name "$ECR_REPOSITORY" \
+        --image-ids imageTag="$IMAGE_TAG" \
+        --query 'imageDetails[0].imageDigest' \
+        --output text 2>/dev/null || true)
+      if [ "$TARGET_DIGEST" = "$SOURCE_DIGEST" ]; then
+        echo "PROD image already exists with the same digest; nothing to promote."
+        exit 0
+      fi
+      if [ -n "$TARGET_DIGEST" ] && [ "$TARGET_DIGEST" != "None" ]; then
+        echo "FATAL: PROD image tag already exists with a different digest: $TARGET_DIGEST" >&2
+        exit 1
+      fi
+    - ecr_login "$PROD_ECR_REGISTRY"
+    - docker tag "$QA_ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" "$PROD_ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+    - docker push "$PROD_ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+
+promote-server-image:prod:
+  extends: .promote-image-to-prod
+  variables:
+    ECR_REPOSITORY: budget-wise/server
+
+# ==============================================================================
+# RECOVERY SERVER — separate trust boundary
+# Pushes the @budget/recovery-server Docker image to AWS ECR using OIDC.
+# Separate from main server push because recovery has different runtime
+# requirements and a dedicated ECS service.
+# ==============================================================================
+
+push-recovery-image:
+  extends: .aws-ecr-docker-job
+  variables:
+    AWS_ROLE_ARN: arn:aws:iam::113008552221:role/gitlab-ecr-push-dev
+    ECR_REGISTRY: 113008552221.dkr.ecr.eu-central-1.amazonaws.com
+  script:
+    - assume_aws_role "$AWS_ROLE_ARN"
+    - ecr_login "$ECR_REGISTRY"
+    # Build from monorepo root context with Dockerfile path specified
+    - docker build -t $ECR_REGISTRY/budget-wise/recovery-server:$CI_COMMIT_SHORT_SHA -f packages/recovery-server/Dockerfile .
+    # Push commit SHA tag
+    - docker push $ECR_REGISTRY/budget-wise/recovery-server:$CI_COMMIT_SHORT_SHA
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+promote-recovery-image:qa:
+  extends: .promote-image-to-qa
+  needs:
+    - job: push-recovery-image
+      optional: true
+  variables:
+    ECR_REPOSITORY: budget-wise/recovery-server
+
+promote-recovery-image:prod:
+  extends: .promote-image-to-prod
+  variables:
+    ECR_REPOSITORY: budget-wise/recovery-server
+
+recovery:lint:
+  stage: quality
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  interruptible: true
+  extends: .nx-setup
+  script:
+    - npx nx run recovery-server:lint
+  needs:
+    - install
+  allow_failure: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+recovery:test:
+  stage: quality
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  interruptible: true
+  extends: .nx-setup
+  script:
+    - |
+      set -e
+      export NODE_OPTIONS="--max-old-space-size=4096"
+      export NX_DAEMON=false
+      export NX_VERBOSE_LOGGING=false
+      mkdir -p coverage/recovery-server
+      npx nx run recovery-server:test
+  needs:
+    - install
+  allow_failure: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/recovery-server/**/cobertura-coverage.xml
+    paths:
+      - coverage/recovery-server/
+    expire_in: 1 week
+
+recovery:typecheck:
+  stage: build
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  interruptible: true
+  extends: .nx-setup
+  script:
+    - npx nx run recovery-server:typecheck
+  needs:
+    - install
+  allow_failure: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+recovery:build:
+  stage: build
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  interruptible: true
+  extends: .nx-setup
+  script:
+    - npx nx run recovery-server:build
+  needs:
+    - install
+  allow_failure: false
+  artifacts:
+    paths:
+      - packages/recovery-server/dist/
+    expire_in: 1 week
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+recovery:health-check:
+  stage: build
+  image: node:${NODE_VERSION}-alpine
+  tags: [aws-2xlarge]
+  needs:
+    - recovery:build
+  extends: .nx-setup
+  script:
+    - |
+      set -e
+      # Install production deps so the built ESM bundle can resolve fastify etc.
+      pnpm install --frozen-lockfile --prod --filter @budget/recovery-server...
+      # Start the built binary in the background; secrets not needed for /health
+      NODE_ENV=test node packages/recovery-server/dist/main.js &
+      SERVER_PID=$!
+      # Wait for the server to be ready (up to 15s)
+      for i in $(seq 1 15); do
+        if wget -qO- http://127.0.0.1:3001/health > /tmp/health_response.json 2>/dev/null; then
+          break
+        fi
+        echo "Waiting for recovery server... ($i/15)"
+        sleep 1
+      done
+      # Assert response matches expected shape
+      RESPONSE=$(cat /tmp/health_response.json 2>/dev/null || echo '{}')
+      echo "Health response: $RESPONSE"
+      echo "$RESPONSE" | grep -q '"status":"ok"' || (echo "FAIL: status != ok" && kill $SERVER_PID 2>/dev/null; exit 1)
+      echo "$RESPONSE" | grep -q '"service":"recovery"' || (echo "FAIL: service != recovery" && kill $SERVER_PID 2>/dev/null; exit 1)
+      echo "Health check passed"
+      kill $SERVER_PID 2>/dev/null || true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+# ==============================================================================
+# RELEASE & CLEANUP
+# ==============================================================================
+
+release:
+  stage: deploy
+  image: registry.gitlab.com/gitlab-org/cli:latest
+  tags: [aws-2xlarge]
+  script:
+    - echo "Release ${CI_COMMIT_TAG} created via GitLab CI native release feature"
+  needs:
+    - build:mobile:production
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  release:
+    tag_name: $CI_COMMIT_TAG
+    description: "Release ${CI_COMMIT_TAG}"
+
+stop:preview:
+  stage: deploy
+  image: registry.gitlab.com/gitlab-org/cli:latest
+  tags: [aws-2xlarge]
+  script:
+    - echo "Preview environment stopped"
+  environment:
+    name: preview/${CI_COMMIT_REF_NAME}
+    action: stop
+  rules:
+    - if: $CI_MERGE_REQUEST_ID
+      when: manual
+  needs: []

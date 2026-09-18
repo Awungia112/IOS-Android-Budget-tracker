@@ -1,0 +1,496 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MigrationPayload",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "exportedAt": {
+      "type": "string"
+    },
+    "platform": {
+      "type": "string",
+      "enum": [
+        "android",
+        "ios"
+      ]
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/MigrationAccount"
+      }
+    },
+    "categories": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/MigrationCategory"
+      }
+    },
+    "transactions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/MigrationTransaction"
+      }
+    },
+    "limits": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/MigrationLimit"
+      }
+    },
+    "recurringEntries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/MigrationRecurring"
+      }
+    },
+    "savingGoals": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/MigrationSavingGoal"
+      }
+    },
+    "templates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/MigrationTemplate"
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "exportedAt",
+    "platform",
+    "accounts",
+    "categories",
+    "transactions",
+    "limits",
+    "recurringEntries",
+    "savingGoals",
+    "templates"
+  ],
+  "definitions": {
+    "MigrationAccount": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "initials": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "isOnline": {
+          "type": "boolean"
+        },
+        "lastSyncedAt": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "firstName": {
+          "type": "string"
+        },
+        "lastName": {
+          "type": "string"
+        },
+        "userName": {
+          "type": "string"
+        },
+        "remoteId": {
+          "type": "string"
+        },
+        "onlineId": {
+          "type": "string"
+        },
+        "legacyId": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "legacySource": {
+          "type": "string",
+          "enum": [
+            "room",
+            "sqlite_v1",
+            "core_data",
+            "realm"
+          ]
+        },
+        "isDeleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "legacyId",
+        "legacySource"
+      ]
+    },
+    "MigrationTransaction": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "categoryId": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "date": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "savingsGoalId": {
+          "type": "string"
+        },
+        "isCompletionTransaction": {
+          "type": "boolean"
+        },
+        "onlineId": {
+          "type": "string"
+        },
+        "legacyId": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "legacySource": {
+          "type": "string",
+          "enum": [
+            "room",
+            "sqlite_v1",
+            "core_data",
+            "realm"
+          ]
+        },
+        "isDeleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "accountId",
+        "categoryId",
+        "amount",
+        "date",
+        "title",
+        "legacyId",
+        "legacySource"
+      ]
+    },
+    "MigrationCategory": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "isDefault": {
+          "type": "boolean"
+        },
+        "onlineId": {
+          "type": "string"
+        },
+        "legacyId": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "legacySource": {
+          "type": "string",
+          "enum": [
+            "room",
+            "sqlite_v1",
+            "core_data",
+            "realm"
+          ]
+        },
+        "isDeleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "legacyId",
+        "legacySource"
+      ]
+    },
+    "MigrationLimit": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "categoryId": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "onlineId": {
+          "type": "string"
+        },
+        "legacyId": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "legacySource": {
+          "type": "string",
+          "enum": [
+            "room",
+            "sqlite_v1",
+            "core_data",
+            "realm"
+          ]
+        },
+        "isDeleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "accountId",
+        "amount",
+        "categoryId",
+        "legacyId",
+        "legacySource"
+      ]
+    },
+    "MigrationRecurring": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "categoryId": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "frequency": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "startDate": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "dayOfMonth": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "onlineId": {
+          "type": "string"
+        },
+        "legacyId": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "legacySource": {
+          "type": "string",
+          "enum": [
+            "room",
+            "sqlite_v1",
+            "core_data",
+            "realm"
+          ]
+        },
+        "isDeleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "accountId",
+        "categoryId",
+        "amount",
+        "frequency",
+        "startDate",
+        "name",
+        "legacyId",
+        "legacySource"
+      ]
+    },
+    "MigrationSavingGoal": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "targetAmount": {
+          "type": "number"
+        },
+        "monthlyAmount": {
+          "type": "number"
+        },
+        "deadline": {
+          "type": "string"
+        },
+        "categoryId": {
+          "type": "string"
+        },
+        "isOpen": {
+          "type": "boolean"
+        },
+        "creationDate": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "onlineId": {
+          "type": "string"
+        },
+        "legacyId": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "legacySource": {
+          "type": "string",
+          "enum": [
+            "room",
+            "sqlite_v1",
+            "core_data",
+            "realm"
+          ]
+        },
+        "isDeleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "accountId",
+        "name",
+        "targetAmount",
+        "deadline",
+        "categoryId",
+        "legacyId",
+        "legacySource"
+      ]
+    },
+    "MigrationTemplate": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "categoryId": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "onlineId": {
+          "type": "string"
+        },
+        "legacyId": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "legacySource": {
+          "type": "string",
+          "enum": [
+            "room",
+            "sqlite_v1",
+            "core_data",
+            "realm"
+          ]
+        },
+        "isDeleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "accountId",
+        "name",
+        "amount",
+        "categoryId",
+        "legacyId",
+        "legacySource"
+      ]
+    }
+  }
+}

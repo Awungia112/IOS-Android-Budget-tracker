@@ -1,0 +1,44 @@
+@startuml Command_Execution_Flow
+skinparam sequenceMessageAlign center
+skinparam defaultFontSize 12
+skinparam sequenceGroupBodyBackgroundColor #FAFAFA
+
+title Command Execution Flow - Write Operation
+
+actor User
+participant "Page /\nComponent" as UI
+participant "BudgetContext" as Context
+participant "BudgetService\n(Facade)" as Service
+participant "Repository" as Repo
+participant "ChangeLog" as Log
+database "IndexedDB" as DB
+
+User -> UI : tap "Add Transaction"
+UI -> Context : addTransaction(data)
+Context -> Service : addTransaction(data)
+
+group execute(command)
+    Service -> Service : build Command object\n{ type: CREATE_TRANSACTION,\n  payload: {...} }
+
+    == Apply Locally ==
+    Service -> Repo : create(transaction)
+    Repo -> DB : table.add(item)
+    DB --> Repo : ok
+    Repo --> Service : Transaction
+
+    == Append to ChangeLog ==
+    Service -> Log : append(command)
+    Log -> DB : changeRecords.add(record)
+    DB --> Log : ok
+
+    == Phase 2 (Future) ==
+    Service ->x Service : encrypt(command)
+    Service ->x Service : syncService.push(encrypted)
+end
+
+Service --> Context : Transaction
+Context -> Context : setTransactions(prev => [...prev, tx])
+Context -> UI : toast("Transaction added")
+UI --> User : updated view
+
+@enduml

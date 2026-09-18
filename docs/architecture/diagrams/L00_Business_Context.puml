@@ -1,0 +1,31 @@
+@startuml L00-Business-Context
+skinparam componentStyle uml2
+
+title Budget Wise PWA - Business Context
+
+actor "User" as user
+
+component "Budget Wise\nPWA" as pwa #moccasin
+
+component "Browser \n" #moccasin {
+    component "IndexedDB" as indexeddb #lightyellow
+    component "Service\nWorker" as sw #lightyellow
+}
+
+component "Cloudflare\nPages" as cloudflare #lightyellow
+
+component "GitLab\nCI/CD" as gitlab #lightyellow
+
+user ..> pwa : manage\nfinances
+pwa ..> indexeddb : persist\ndata
+pwa ..> sw : offline\nsupport
+gitlab ..> cloudflare : deploy
+cloudflare ..> pwa : serve
+
+note right of pwa
+  Phase 1: Offline PWA
+  All data stored locally
+  No backend required
+end note
+
+@enduml

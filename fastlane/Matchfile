@@ -1,0 +1,13 @@
+gitlab_host("https://git.adorsys.de")
+
+gitlab_project("dip/budget-wise-pwa-now")
+
+if ENV["GIT_AUTH_TOKEN"]
+  private_token(ENV["GIT_AUTH_TOKEN"])
+else
+  UI.important("⚠️ GIT_AUTH_TOKEN not set.")
+end
+
+storage_mode("gitlab_secure_files")
+
+type("appstore")

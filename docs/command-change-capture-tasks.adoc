@@ -1,0 +1,216 @@
+= Command-Based Change Capture  Implementation Tasks
+
+Reference: link:architecture/03_design_decisions.adoc[Design Decision: Command-Based Change Capture]
+
+== Overview
+
+This document breaks down the implementation of the Command-Based Change Capture pattern into discrete, independently deliverable tasks. Each task produces a working application with no behavior change.
+
+== Task 1: Define Command Types
+
+*Goal:* Create the typed command definitions that represent every write operation in the application.
+
+*Package:* `@budget/core`
+
+*Files to create:*
+
+* `packages/core/src/commands/types.ts` — Command discriminated union + ChangeRecord type
+
+*Scope:*
+
+* Define the `Command` discriminated union with 22 variants:
+** Account: `CREATE_ACCOUNT`, `UPDATE_ACCOUNT`, `DELETE_ACCOUNT`
+** Transaction: `CREATE_TRANSACTION`, `UPDATE_TRANSACTION`, `DELETE_TRANSACTION`
+** Category: `CREATE_CATEGORY`, `BULK_CREATE_CATEGORIES`, `DELETE_CATEGORY`
+** Limit: `CREATE_LIMIT`, `UPDATE_LIMIT`, `DELETE_LIMIT`
+** Template: `CREATE_TEMPLATE`, `UPDATE_TEMPLATE`, `DELETE_TEMPLATE`
+** RecurringItem: `CREATE_RECURRING`, `UPDATE_RECURRING`, `DELETE_RECURRING`
+** SavingsGoal: `CREATE_SAVINGS_GOAL`, `UPDATE_SAVINGS_GOAL`, `DELETE_SAVINGS_GOAL`
+** Bulk/Special: `IMPORT_DATA`, `RESET_DATABASE`
+* Define the `ChangeRecord` type:
+** `id: string`
+** `command: Command`
+** `timestamp: string`
+** `accountId: string`
+** `synced: boolean`
+* Export from `packages/core/src/commands/index.ts`
+* Export from `packages/core/src/index.ts`
+
+*Acceptance criteria:*
+
+* All 22 command types are defined with correct payload types matching existing domain entities
+* `ChangeRecord` type is defined
+* Types compile with no errors
+* No runtime behavior change
+
+---
+
+== Task 2: Add ChangeLog Table to Dexie Schema
+
+*Goal:* Add the `changeRecords` object store to IndexedDB so change records can be persisted.
+
+*Package:* `@budget/core`
+
+*Files to modify:*
+
+* `packages/core/src/db/database.ts` — Add `changeRecords` table to Dexie schema, bump DB version
+
+*Files to create:*
+
+* `packages/core/src/changelog/change-log.repository.ts` — Repository for ChangeRecord CRUD
+* `packages/core/src/changelog/change-log.ts` — ChangeLog class with `append()` and `getUnsynced()` methods
+* `packages/core/src/changelog/index.ts` — Barrel export
+
+*Scope:*
+
+* Add `changeRecords` table with indexes: `id`, `timestamp`, `accountId`, `synced`
+* Increment Dexie schema version
+* Implement `ChangeLog.append(command, accountId)` — creates a ChangeRecord and persists it
+* Implement `ChangeLog.getUnsynced()` — returns all records where `synced === false` (for Phase 2)
+* Implement `ChangeLog.markSynced(id)` — sets `synced = true` (for Phase 2)
+* Export from `packages/core/src/index.ts`
+
+*Acceptance criteria:*
+
+* Database migration runs without data loss on existing installations
+* `ChangeLog.append()` persists a record to IndexedDB
+* Unit tests for append, getUnsynced, markSynced
+* No runtime behavior change — nothing calls ChangeLog yet
+
+---
+
+== Task 3: Create BudgetService Facade
+
+*Goal:* Implement the service that wraps all repository write operations and logs commands.
+
+*Package:* `@budget/core`
+
+*Files to create:*
+
+* `packages/core/src/services/budget.service.ts` — BudgetService class
+
+*Files to modify:*
+
+* `packages/core/src/services/index.ts` — Export BudgetService
+
+*Scope:*
+
+Implement one public method per write operation. Each method:
+
+1. Builds the entity (generates ID, sets accountId)
+2. Calls `execute(command)` which applies locally via the existing repository and appends to ChangeLog
+3. Returns the created/updated entity
+
+Methods to implement:
+
+|===
+| Method | Command | Repository Call
+
+| `createAccount(data)` | `CREATE_ACCOUNT` | `accountRepo.create()`
+| `updateAccount(account)` | `UPDATE_ACCOUNT` | `accountRepo.update()`
+| `deleteAccount(accountId)` | `DELETE_ACCOUNT` | `accountRepo.deleteAccountWithCascade()`
+| `createTransaction(data)` | `CREATE_TRANSACTION` | `transactionRepo.create()`
+| `updateTransaction(tx)` | `UPDATE_TRANSACTION` | `transactionRepo.update()`
+| `deleteTransaction(id)` | `DELETE_TRANSACTION` | `transactionRepo.delete()`
+| `createCategory(data)` | `CREATE_CATEGORY` | `categoryRepo.create()`
+| `bulkCreateCategories(data[])` | `BULK_CREATE_CATEGORIES` | `categoryRepo.bulkCreate()`
+| `deleteCategory(id)` | `DELETE_CATEGORY` | `categoryRepo.delete()`
+| `createLimit(data)` | `CREATE_LIMIT` | `limitRepo.create()`
+| `updateLimit(limit)` | `UPDATE_LIMIT` | `limitRepo.update()`
+| `deleteLimit(id)` | `DELETE_LIMIT` | `limitRepo.delete()`
+| `createTemplate(data)` | `CREATE_TEMPLATE` | `templateRepo.create()`
+| `updateTemplate(template)` | `UPDATE_TEMPLATE` | `templateRepo.update()`
+| `deleteTemplate(id)` | `DELETE_TEMPLATE` | `templateRepo.delete()`
+| `createRecurring(data)` | `CREATE_RECURRING` | `recurringRepo.create()`
+| `updateRecurring(item)` | `UPDATE_RECURRING` | `recurringRepo.update()`
+| `deleteRecurring(id)` | `DELETE_RECURRING` | `recurringRepo.delete()`
+| `createSavingsGoal(data)` | `CREATE_SAVINGS_GOAL` | `savingsRepo.create()`
+| `updateSavingsGoal(goal)` | `UPDATE_SAVINGS_GOAL` | `savingsRepo.update()`
+| `deleteSavingsGoal(id)` | `DELETE_SAVINGS_GOAL` | `savingsRepo.delete()`
+| `importData(data)` | `IMPORT_DATA` | Multiple repo calls
+| `resetDatabase()` | `RESET_DATABASE` | `db.resetDatabase()`
+|===
+
+*Acceptance criteria:*
+
+* Every method builds the correct Command, calls the correct repository, and appends to ChangeLog
+* Unit tests for each method (mock repositories + mock ChangeLog)
+* No runtime behavior change — nothing calls BudgetService yet
+
+---
+
+== Task 4: Migrate BudgetContext to BudgetService
+
+*Goal:* Replace all direct repository calls in `BudgetContext.tsx` with `BudgetService` method calls.
+
+*Package:* `@budget/app`
+
+*File to modify:*
+
+* `packages/app/src/contexts/BudgetContext.tsx`
+
+*Scope:*
+
+Replace each repository call with its BudgetService equivalent. The context retains ownership of React state updates and toasts.
+
+Migrations (one commit per entity recommended):
+
+|===
+| BudgetContext Method | Current Call | New Call
+
+| `addTransaction` | `transactionRepo.create(tx)` | `budgetService.createTransaction(data)`
+| `updateTransaction` | `transactionRepo.update(tx)` | `budgetService.updateTransaction(tx)`
+| `deleteTransaction` | `transactionRepo.delete(id)` | `budgetService.deleteTransaction(id)`
+| `addAccount` | `accountRepo.create(acct)` + `categoryRepo.bulkCreate(cats)` | `budgetService.createAccount(data)` + `budgetService.bulkCreateCategories(cats)`
+| `deleteAccount` | `accountRepo.deleteAccountWithCascade(id)` | `budgetService.deleteAccount(id)`
+| `updateAccount` | `accountRepo.update(acct)` | `budgetService.updateAccount(acct)`
+| `addCategory` | `categoryRepo.create(cat)` | `budgetService.createCategory(data)`
+| `deleteCategory` | `categoryRepo.delete(id)` | `budgetService.deleteCategory(id)`
+| `addLimit` | `limitRepo.create(limit)` | `budgetService.createLimit(data)`
+| `updateLimit` | `limitRepo.update(limit)` | `budgetService.updateLimit(limit)`
+| `deleteLimit` | `limitRepo.delete(id)` | `budgetService.deleteLimit(id)`
+| `addTemplate` | `templateRepo.create(tpl)` | `budgetService.createTemplate(data)`
+| `updateTemplate` | `templateRepo.update(tpl)` | `budgetService.updateTemplate(tpl)`
+| `deleteTemplate` | `templateRepo.delete(id)` | `budgetService.deleteTemplate(id)`
+| `addRecurringItem` | `recurringRepo.create(item)` | `budgetService.createRecurring(data)`
+| `updateRecurringItem` | `recurringRepo.update(item)` | `budgetService.updateRecurring(item)`
+| `deleteRecurringItem` | `recurringRepo.delete(id)` | `budgetService.deleteRecurring(id)`
+| `addSavingsGoal` | `savingsRepo.create(goal)` | `budgetService.createSavingsGoal(data)`
+| `updateSavingsGoal` | `savingsRepo.update(goal)` | `budgetService.updateSavingsGoal(goal)`
+| `deleteSavingsGoal` | `savingsRepo.delete(id)` | `budgetService.deleteSavingsGoal(id)`
+| `importData` | Multiple repo calls inline | `budgetService.importData(data)`
+| `resetDatabase` | `db.resetDatabase()` | `budgetService.resetDatabase()`
+|===
+
+*Acceptance criteria:*
+
+* Zero direct repository calls remain in `BudgetContext.tsx`
+* Zero direct `db.*` calls remain in `BudgetContext.tsx`
+* All existing tests pass without modification (behavior is identical)
+* ChangeLog table accumulates records for every write operation
+
+---
+
+== Task 5: Internalize Repository Exports
+
+*Goal:* Stop exporting repositories from `@budget/core` so the write path is architecturally enforced.
+
+*Package:* `@budget/core`
+
+*Files to modify:*
+
+* `packages/core/src/repositories/index.ts` — Remove public exports
+* `packages/core/src/index.ts` — Remove `export * from './repositories'`
+
+*Scope:*
+
+* Remove repository exports from the public API of `@budget/core`
+* Repositories remain accessible internally (used by `BudgetService` and existing read-only services)
+* Verify no imports from `@budget/app` reference repositories directly
+
+*Acceptance criteria:*
+
+* `@budget/app` cannot import any repository class from `@budget/core`
+* TypeScript compilation succeeds across both packages
+* All tests pass
+* `BudgetService` is the only write API available to the app layer

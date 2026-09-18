@@ -1,0 +1,483 @@
+:imagesdir: images
+
+[[section-design-decisions]]
+== Design Decisions
+
+This section documents the key architectural and design decisions made for the Budget Wise PWA project.
+
+=== Nx Monorepo Structure
+
+*Problem:*
+The codebase needs clear separation between data logic and presentation logic to improve maintainability, testability, and enable future reuse of the core logic in other applications (e.g., mobile native apps).
+
+*Solution:*
+Adopt Nx monorepo with two packages:
+
+* `@budget/core` - Data layer (types, repositories, services, connection manager)
+* `@budget/app` - Presentation layer (React components, contexts, hooks, pages)
+
+*Benefits:*
+
+1. Clear separation of concerns between data and UI
+2. `@budget/core` has zero React dependencies, making it reusable
+3. Nx provides build caching and affected commands for efficient CI/CD
+4. Team members can work on packages independently
+5. Easy to add new packages in the future (e.g., `@budget/mobile`)
+
+=== No Event Bus
+
+*Problem:*
+Should the application use an Event Bus pattern for communication between components and layers?
+
+*Decision:*
+Do NOT implement an Event Bus.
+
+*Rationale:*
+
+1. React Context API already provides state updates to subscribed components
+2. Event Bus adds complexity without clear benefit for this application
+3. Debugging event-driven systems is harder than direct state management
+4. No real-time multi-user sync requirements in Phase 1
+5. YAGNI principle - don't add complexity until it's needed
+
+*Alternative considered:*
+Custom Event Bus with publish/subscribe pattern was evaluated but rejected as overkill.
+
+*When to reconsider:*
+
+* If cross-tab synchronization becomes a requirement
+* If real-time collaborative features are added
+* If complex decoupled plugin architecture is needed
+
+=== Single Database Connection (Connection Manager)
+
+*Problem:*
+The current implementation opens a new IndexedDB connection for every database operation, which is inefficient and can cause issues with transaction management.
+
+*Solution:*
+Implement a Connection Manager using the Singleton pattern that:
+
+1. Opens the database connection once on first access
+2. Reuses the same `IDBDatabase` instance for all operations
+3. Handles automatic reconnection if the browser closes the connection
+4. Creates all required object stores on database upgrade
+
+*Implementation:*
+
+[source,typescript]
+----
+class DatabaseConnection {
+  private static instance: DatabaseConnection;
+  private db: IDBDatabase | null = null;
+
+  static getInstance(): DatabaseConnection {
+    if (!DatabaseConnection.instance) {
+      DatabaseConnection.instance = new DatabaseConnection();
+    }
+    return DatabaseConnection.instance;
+  }
+
+  async getConnection(): Promise<IDBDatabase> {
+    if (this.db) return this.db;
+    // Open connection...
+  }
+}
+
+export const dbConnection = DatabaseConnection.getInstance();
+----
+
+*Benefits:*
+
+1. Efficient resource usage - single connection shared across app
+2. Consistent transaction handling
+3. Automatic reconnection on connection close
+4. Single point of configuration for database settings
+
+=== Repository Pattern
+
+*Problem:*
+Data access code is mixed with business logic and UI code in the current `BudgetContext.tsx` (27KB file), making it hard to maintain and test.
+
+*Solution:*
+Implement the Repository pattern with:
+
+1. `BaseRepository<T>` - Generic class with CRUD operations
+2. Entity-specific repositories extending the base (e.g., `TransactionRepository`)
+3. Repositories use the Connection Manager singleton
+4. All database queries centralized in repository layer
+
+*Structure:*
+
+----
+@budget/core/src/repositories/
+├── base.repository.ts
+├── transaction.repository.ts
+├── category.repository.ts
+├── account.repository.ts
+├── limit.repository.ts
+├── template.repository.ts
+├── recurring.repository.ts
+└── savings.repository.ts
+----
+
+*Benefits:*
+
+1. Database logic in one place
+2. Easy to test with mock repositories
+3. Easy to swap IndexedDB for REST API in Phase 2
+4. Type-safe data access
+
+=== IndexedDB for Local Storage
+
+*Problem:*
+Where should user data be stored? Options: localStorage, IndexedDB, or cloud database.
+
+*Decision:*
+Use IndexedDB as the primary storage mechanism.
+
+*Rationale:*
+
+1. *Privacy* - Data stays on user's device, no cloud sync required
+2. *Offline-first* - Works without internet connection
+3. *Capacity* - IndexedDB can store large amounts of data (vs 5MB localStorage limit)
+4. *Structure* - Supports multiple object stores, indexes, and transactions
+5. *Client requirement* - "No mandatory account connection" is a key feature
+
+*Object Stores:*
+
+|===
+| Store | Purpose
+
+| accounts | User account profiles
+| transactions | Income and expense records
+| categories | Transaction categories
+| limits | Spending limits per category
+| templates | Transaction templates
+| recurringItems | Recurring transaction definitions
+| savingsGoals | Savings targets
+|===
+
+=== React Context over Redux/Zustand
+
+*Problem:*
+What state management solution should be used?
+
+*Decision:*
+Use React Context API, not Redux or Zustand.
+
+*Rationale:*
+
+1. Application state is relatively simple
+2. No need for complex middleware or time-travel debugging
+3. React Context is built-in, no additional dependencies
+4. Sufficient for the current feature set
+5. Team is already familiar with Context API
+
+*When to reconsider:*
+
+* If performance issues arise from excessive re-renders
+* If state logic becomes too complex
+* If developer tools for debugging become essential
+
+=== PWA over Native App
+
+*Problem:*
+Should the application be built as a native mobile app or a Progressive Web App?
+
+*Decision:*
+Build as a PWA with potential native wrapper for app stores.
+
+*Rationale:*
+
+1. *Cross-platform* - Single codebase works on iOS, Android, and desktop
+2. *Cost-effective* - No need to maintain separate native codebases
+3. *Faster development* - Web technologies are faster to develop with
+4. *Easy updates* - Users always get the latest version
+5. *Installable* - PWA can be installed on home screen
+6. *App Store distribution* - PWABuilder can wrap PWA for Play Store/App Store
+
+*Technology:*
+
+* `vite-plugin-pwa` for Service Worker generation
+* Web App Manifest for installability
+* PWABuilder for app store packaging
+
+=== Technology Stack
+
+Stick to a modern, well-supported technology stack:
+
+*Core Technologies:*
+
+* TypeScript 5.x
+* React 18.x
+* Vite 5.x (build tool)
+* Tailwind CSS (styling)
+* IndexedDB (storage)
+
+*UI Components:*
+
+* shadcn/ui (Radix primitives)
+* Recharts (data visualization)
+* Lucide React (icons)
+
+*State & Routing:*
+
+* React Context API
+* React Router DOM 6.x
+
+*Forms & Validation:*
+
+* React Hook Form
+* Zod (schema validation)
+
+*Internationalization:*
+
+* react-i18next
+* i18next
+
+*Build & Tooling:*
+
+* Nx (monorepo management)
+* ESLint
+* TypeScript
+* PostCSS
+
+*CI/CD & Hosting:*
+
+* GitLab CI/CD
+* Cloudflare Pages
+* Wrangler CLI
+
+=== Offline-First Architecture
+
+*Problem:*
+How should the application handle offline scenarios?
+
+*Decision:*
+Implement an offline-first architecture where:
+
+1. All data is stored locally in IndexedDB
+2. Application works fully without internet connection
+3. Service Worker caches all static assets
+4. No backend required for Phase 1 features
+
+*Benefits:*
+
+1. Instant load times after first visit
+2. Works in areas with poor connectivity
+3. Privacy - no data sent to servers
+4. Reduced hosting costs
+
+*Future consideration:*
+When Phase 2 adds backend features (PSD2, AI), implement a sync mechanism with conflict resolution.
+
+=== No User Authentication (Phase 1)
+
+*Problem:*
+Should the application require user accounts and authentication?
+
+*Decision:*
+No authentication required for Phase 1.
+
+*Rationale:*
+
+1. Client requirement: "No mandatory account connection"
+2. All data stored locally on device
+3. Multi-account feature is for multiple profiles on same device, not cloud sync
+4. Simplifies architecture and reduces privacy concerns
+
+*Phase 2 consideration:*
+When adding shared accounts or bank integration, authentication will be required. Plan for OAuth 2.0 / OpenID Connect integration.
+
+=== Command-Based Change Capture (Phase 2 Sync Readiness)
+
+*Problem:*
+Phase 2 requires encrypted synchronization between client devices and a backend server (for PSD2 bank integration, AI insights, and cross-device sync). The current architecture has `BudgetContext` calling repositories directly, meaning there is no layer to intercept, log, encrypt, or sync mutations. Additionally, two write paths bypass the `BaseRepository` entirely:
+
+1. `AccountRepository.deleteAccountWithCascade()` runs a Dexie transaction with 7 raw `db.*.where().delete()` calls
+2. `db.resetDatabase()` is called directly from `BudgetContext`
+
+Without an intermediate layer, adding sync later would require modifying every call site across the codebase — a fragile, error-prone migration.
+
+*Decision:*
+Adopt the *Command-Based Change Capture* pattern for all write operations.
+
+This combines three established patterns:
+
+* *Command Pattern* — Every write action is represented as a typed, serializable data object describing user intent
+* *Service Facade* — A single `BudgetService` class is the only public write API, hiding persistence, logging, and future sync behind clean methods
+* *Change Data Capture (CDC)* — Every command is appended to an immutable `ChangeLog` that serves as the sync boundary in Phase 2
+
+*Architecture:*
+
+image::Command_Change_Capture_Architecture.png[Command-Based Change Capture Architecture, 90%, title="Command-Based Change Capture - Architecture Overview", align="center"]
+
+*Write Path Migration (Before and After):*
+
+image::Command_Capture_Migration.png[Write Path Migration, 90%, title="Write Path Migration - Before and After", align="center"]
+
+*Command Types:*
+
+Commands are a TypeScript discriminated union. Each variant represents one semantic user action. The full inventory (22 command types) covers every write operation in the application:
+
+|===
+| Entity | Commands
+
+| Account
+| `CREATE_ACCOUNT`, `UPDATE_ACCOUNT`, `DELETE_ACCOUNT`
+
+| Transaction
+| `CREATE_TRANSACTION`, `UPDATE_TRANSACTION`, `DELETE_TRANSACTION`
+
+| Category
+| `CREATE_CATEGORY`, `BULK_CREATE_CATEGORIES`, `DELETE_CATEGORY`
+
+| Limit
+| `CREATE_LIMIT`, `UPDATE_LIMIT`, `DELETE_LIMIT`
+
+| Template
+| `CREATE_TEMPLATE`, `UPDATE_TEMPLATE`, `DELETE_TEMPLATE`
+
+| RecurringItem
+| `CREATE_RECURRING`, `UPDATE_RECURRING`, `DELETE_RECURRING`
+
+| SavingsGoal
+| `CREATE_SAVINGS_GOAL`, `UPDATE_SAVINGS_GOAL`, `DELETE_SAVINGS_GOAL`
+
+| Bulk / Special
+| `IMPORT_DATA`, `RESET_DATABASE`
+|===
+
+Each command is stored as a `ChangeRecord`:
+
+[source,typescript]
+----
+type ChangeRecord = {
+  id: string;
+  command: Command;
+  timestamp: string;
+  accountId: string;
+  synced: boolean; // Phase 2: has this been pushed to server?
+};
+----
+
+*Key Design Principle — Capture Intent, Not State:*
+
+Commands describe *what the user intended*, not *what changed in the database*. A `DELETE_ACCOUNT` is one command — not 7 individual table deletions. The receiving device replays the command and runs its own cascade logic. This makes commands:
+
+* Semantically meaningful to humans and other devices
+* Natural to encrypt (one JSON blob per action)
+* Easy to reason about during conflict resolution
+
+*Command Execution Flow:*
+
+image::Command_Execution_Flow.png[Command Execution Flow, 80%, title="Command Execution Flow - Write Operation", align="center"]
+
+*How the Service Facade Works:*
+
+[source,typescript]
+----
+class BudgetService {
+  private repos: Repositories;
+  private changeLog: ChangeLog;
+
+  async addTransaction(data: CreateTransactionInput): Promise<Transaction> {
+    const transaction = { id: generateUUID(), ...data };
+    await this.execute({ type: 'CREATE_TRANSACTION', payload: transaction });
+    return transaction;
+  }
+
+  async deleteAccount(accountId: string): Promise<void> {
+    await this.execute({ type: 'DELETE_ACCOUNT', payload: { accountId } });
+  }
+
+  private async execute(command: Command): Promise<void> {
+    await this.applyLocally(command);
+    await this.changeLog.append(command);
+  }
+
+  private async applyLocally(command: Command): Promise<void> {
+    switch (command.type) {
+      case 'CREATE_TRANSACTION':
+        await this.repos.transaction.create(command.payload);
+        break;
+      case 'DELETE_ACCOUNT':
+        await this.repos.account.deleteAccountWithCascade(
+          command.payload.accountId
+        );
+        break;
+      // ... each command maps to repository calls
+    }
+  }
+}
+----
+
+*What Changes in BudgetContext:*
+
+Minimal. Replace direct repository calls with service method calls. The context retains ownership of React state and UI concerns (toasts, state updates):
+
+[source,typescript]
+----
+// Before (current)
+await transactionRepo.create(transaction);
+
+// After
+const transaction = await budgetService.addTransaction(data);
+----
+
+*Export Boundaries:*
+
+After migration, `@budget/core` exports are restructured:
+
+|===
+| Export | Visibility | Purpose
+
+| `BudgetService`
+| Public
+| The only write API available to `@budget/app`
+
+| Repositories
+| Internal
+| Used only by `BudgetService` — not exported
+
+| Types, read queries
+| Public
+| Domain types and read-only data access
+|===
+
+This enforces completeness architecturally. Future developers cannot add rogue write paths because repositories are not accessible from the app layer.
+
+*Migration Plan:*
+
+See link:../command-change-capture-tasks.adoc[Command-Based Change Capture — Implementation Tasks] for the full task breakdown.
+
+*Phase 2 Extension Point:*
+
+When sync is ready, the only change is inside `BudgetService.execute()`. No changes to `BudgetContext`, repositories, or UI components.
+
+*Alternatives Considered:*
+
+|===
+| Alternative | Why Rejected
+
+| Dexie Hooks (ORM-level interception)
+| Captures low-level storage events, not semantic intent. A cascade delete produces 7 change records instead of one meaningful command. Ties sync logic to ORM — cannot survive a storage layer swap.
+
+| Log in BaseRepository
+| Mixes data access concerns with sync concerns. Repositories should know about storage, not about encryption or sync. Same cascade problem — operates at the record level, not the intent level.
+
+| Full CQRS (separate read/write databases)
+| Over-engineering for a single-user PWA. IndexedDB serves both reads and writes adequately.
+
+| Event Sourcing (events as source of truth)
+| Adds reconstruction complexity with no benefit. IndexedDB remains the source of truth. The ChangeLog is for sync, not for state rebuilding.
+
+| State-based Sync (CRDTs)
+| Requires field-level conflict resolution. Command-based sync resolves conflicts at the intent level, which is simpler to reason about for this domain.
+|===
+
+*When to Reconsider:*
+
+* If real-time collaborative editing becomes a requirement (may need CRDTs)
+* If the command log grows too large for IndexedDB (may need pruning or compaction strategy)
+* If offline conflict resolution becomes frequent (may need more sophisticated merge strategies)

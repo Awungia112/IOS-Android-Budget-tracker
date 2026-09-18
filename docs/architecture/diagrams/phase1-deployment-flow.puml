@@ -1,0 +1,65 @@
+@startuml Phase1_Deployment_Flow
+
+title My Budget PWA - Phase 1 Deployment Flow
+
+skinparam backgroundColor #FEFEFE
+skinparam sequenceArrowThickness 2
+skinparam defaultFontSize 11
+
+actor "Developer" as dev #E8F5E9
+participant "GitLab\nRepository" as gitlab #FFF3E0
+participant "GitLab\nCI/CD Runner" as runner #FFE0B2
+participant "Cloudflare\nPages" as cf #E3F2FD
+participant "Cloudflare\nCDN" as cdn #BBDEFB
+actor "End User" as user #F3E5F5
+database "IndexedDB" as db #FFEBEE
+
+== Development and Deployment ==
+
+dev -> gitlab : git push (main/develop/feature)
+activate gitlab
+
+gitlab -> runner : Trigger Pipeline
+activate runner
+
+runner -> runner : npm ci (Install)
+runner -> runner : npm run lint (Check)
+runner -> runner : npm run build (Vite)
+
+runner -> cf : wrangler pages deploy
+activate cf
+
+cf -> cdn : Distribute to edge
+activate cdn
+
+cf --> runner : Deployment URL
+deactivate cf
+
+runner --> gitlab : Pipeline Success
+deactivate runner
+
+gitlab --> dev : Status + URL
+deactivate gitlab
+
+== User Access ==
+
+user -> cdn : Request PWA
+cdn -> user : Serve from nearest edge
+
+user -> user : Service Worker registers
+
+user -> db : Store data locally
+
+== Offline Mode ==
+
+user -> user : Go offline
+user -> db : Continue using app
+user -> user : SW serves cached assets
+
+== Auto Update ==
+
+user -> cdn : Back online
+cdn -> user : Check for updates
+user -> user : Auto-update if new version
+
+@enduml

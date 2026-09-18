@@ -1,0 +1,93 @@
+@startuml Phase1_Deployment_Architecture
+
+title My Budget PWA - Deployment Architecture
+
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+skinparam defaultFontSize 12
+skinparam roundCorner 8
+skinparam shadowing false
+
+skinparam component {
+    BackgroundColor #E3F2FD
+    BorderColor #1976D2
+}
+
+skinparam package {
+    BackgroundColor #FAFAFA
+    BorderColor #9E9E9E
+}
+
+skinparam database {
+    BackgroundColor #E3F2FD
+    BorderColor #1976D2
+}
+
+skinparam note {
+    BackgroundColor #FFFFFF
+    BorderColor #9E9E9E
+}
+
+' ============================================
+' LEFT SIDE - Development & Deployment
+' ============================================
+
+package "Development" {
+    component "GitLab\nRepository" as gitlab
+    component "CI/CD\nPipeline" as pipeline
+}
+
+' ============================================
+' CENTER - Hosting
+' ============================================
+
+package "Cloudflare" {
+    component "Pages" as cf_pages
+    component "CDN" as cdn
+}
+
+' ============================================
+' RIGHT SIDE - Clients
+' ============================================
+
+package "Clients" {
+    component "Mobile / Desktop / PWA" as clients
+}
+
+' ============================================
+' BOTTOM - Storage
+' ============================================
+
+package "Browser Storage" {
+    database "IndexedDB" as indexeddb
+    component "Service Worker" as sw
+}
+
+' ============================================
+' CONNECTIONS
+' ============================================
+
+gitlab -right-> pipeline : push
+pipeline -right-> cf_pages : deploy
+cf_pages -down-> cdn
+
+cdn -right-> clients
+
+clients -down-> indexeddb
+clients -down-> sw
+
+' ============================================
+' NOTES
+' ============================================
+
+note bottom of gitlab
+  main: Production
+  develop: Staging
+end note
+
+note bottom of indexeddb
+  7 object stores
+  Full offline support
+end note
+
+@enduml

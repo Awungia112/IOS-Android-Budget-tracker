@@ -1,0 +1,150 @@
+// Try reading secrets from file
+def secretsPropertiesFile = rootProject.file("secr.properties")
+def secretProperties = new Properties()
+def ksPath = System.getenv("KEYSTORE_PATH") ?: "android-signing-keystore.jks"
+def ksFile = file(ksPath)
+def isReleaseBuild = gradle.startParameter.taskNames.any {
+    it.toLowerCase().contains('release')
+}
+
+if (secretsPropertiesFile.exists()) {
+    secretProperties.load(new FileInputStream(secretsPropertiesFile))
+}
+// Otherwise read from environment variables, this happens in CI
+else if (isReleaseBuild) {
+    def ksPass = System.getenv('KEYSTORE_PASSWORD')
+    def kPass = System.getenv('KEY_PASSWORD')
+    def kAlias = System.getenv('KEY_ALIAS')
+
+    if (ksPass == null || kPass == null || kAlias == null) {
+        error("BUILD FAILED: Environment variables for signing (KEYSTORE_PASSWORD, KEY_PASSWORD, KEY_ALIAS) are missing.")
+    }
+    secretProperties.setProperty("signing_keystore_password", ksPass)
+    secretProperties.setProperty("signing_key_password", kPass)
+    secretProperties.setProperty("signing_key_alias", kAlias)
+}
+if (isReleaseBuild && !ksFile.exists()) {
+    error("BUILD FAILED: Keystore file not found at: ${ksFile.absolutePath}. " +
+            "Check your KEYSTORE_PATH env var or ensure the file is in the root.")
+}
+
+apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
+// Sentry Android plugin — captures native crashes (ANRs, uncaught exceptions)
+// and uploads ProGuard/R8 mapping files so stack traces are human-readable.
+// Reads SENTRY_DSN and SENTRY_AUTH_TOKEN from environment / sentry.properties.
+apply plugin: 'io.sentry.android.gradle'
+
+android {
+    namespace = "de.deutschlandimplus.meinbudget"
+    compileSdk = rootProject.ext.compileSdkVersion
+    signingConfigs {
+        release {
+
+            // You need to specify either an absolute path or include the
+            // keystore file in the same directory as the build.gradle file.
+            storeFile ksFile
+            storePassword secretProperties.getProperty("signing_keystore_password")
+            keyAlias secretProperties.getProperty("signing_key_alias")
+            keyPassword secretProperties.getProperty("signing_key_password")
+        }
+    }
+    defaultConfig {
+        applicationId "de.deutschlandimplus.meinbudget"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode project.hasProperty('VERSION_CODE') ? VERSION_CODE.toInteger() : 175
+        versionName project.hasProperty('VERSION_NAME') ? VERSION_NAME : "4.6.1"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+
+        // Inject the Sentry DSN into the manifest at build time.
+        // Priority: SENTRY_DSN env var (CI) → root .env file (local builds).
+        // If neither is set the placeholder resolves to an empty string and
+        // Sentry stays uninitialised — safe for unsigned local builds.
+        def sentryDsnValue = System.getenv("SENTRY_DSN") ?: ""
+        if (!sentryDsnValue) {
+            def envFile = rootProject.file("../.env")
+            if (envFile.exists()) {
+                envFile.eachLine { line ->
+                    if (line.startsWith("SENTRY_DSN=")) {
+                        sentryDsnValue = line.substring("SENTRY_DSN=".length()).trim()
+                    }
+                }
+            }
+        }
+        manifestPlaceholders = [
+            sentryDsn: sentryDsnValue
+        ]
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            testCoverageEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (secretProperties.getProperty("signing_keystore_password") != null) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+    implementation "androidx.security:security-crypto:1.0.0"
+    // Sentry Capacitor Android bridge — provides the JS↔native bridge for
+    // @sentry/capacitor. Registered manually because pnpm's module structure
+    // prevents cap sync from discovering it automatically.
+    // Note: sentry-capacitor pulls in sentry-android:8.41.0 transitively —
+    // no need to declare sentry-android separately here.
+    implementation project(':sentry-capacitor')
+}
+
+apply from: 'capacitor.build.gradle'
+
+// Sentry Gradle plugin configuration.
+// - autoUploadProguardMapping: uploads R8/ProGuard mapping files so that
+//   minified stack traces in the Sentry dashboard are human-readable.
+//   Requires SENTRY_AUTH_TOKEN in the CI environment.
+// - includeProguardMapping: set to false because minifyEnabled is currently
+//   false in all build types — there are no mapping files to upload.
+//   Flip both this and minifyEnabled to true when obfuscation is enabled.
+// - autoInstallation: disabled because we manage the sentry-android
+//   dependency version explicitly in the dependencies block above.
+sentry {
+    autoUploadProguardMapping = System.getenv("SENTRY_AUTH_TOKEN") != null
+    includeProguardMapping = false
+    autoInstallation {
+        enabled = false
+    }
+}
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

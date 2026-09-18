@@ -1,0 +1,32 @@
+{
+  "name": "@budget/core",
+  "version": "4.6.1",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./crypto/envelope": {
+      "import": "./dist/crypto/envelope.js",
+      "types": "./dist/crypto/envelope.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@budget/shared": "workspace:*",
+    "@capacitor/core": "^8.0.1",
+    "@capacitor/preferences": "^8.0.1",
+    "dexie": "^4.0.1",
+    "libsodium-wrappers": "^0.8.4",
+    "libsodium-wrappers-sumo": "0.8.4",
+    "uuid": "^14.0.0"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.0.0"
+  }
+}

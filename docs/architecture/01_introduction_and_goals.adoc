@@ -1,0 +1,213 @@
+:imagesdir: images
+
+[[section-introduction-and-goals]]
+== Introduction and Goals
+
+=== Overview
+
+The *"My Budget - Expenses under control"* PWA is a modernized personal finance application developed for *Stiftung Deutschland im Plus*, a public foundation focused on combating private over-indebtedness in Germany. The foundation promotes financial literacy, particularly among young people, helping them develop healthy money management habits.
+
+=== Current App Context
+
+The existing app serves approximately *36,000 active users per month* and has received recognition:
+
+* Recognized by androidmag as one of the best apps in 2024
+* Won the 2019 Smartphone App Award for FinanzApp of the Year
+
+However, the current implementation has limitations:
+
+* Graphically outdated interface
+* Relies entirely on manual data entry
+* No automated bank account integration
+* Limited engagement features
+
+=== Target Users
+
+|===
+| User Group | Description | Key Pain Points
+
+| Adolescents
+| Young users learning financial basics
+| Lack of financial education, difficulty tracking spending
+
+| Young Adults
+| Users managing their first independent finances
+| Manual tracking is tedious, no insights into spending patterns
+
+| Families
+| Households managing shared budgets
+| Need for multi-account support, shared expense tracking
+
+| Individuals
+| Anyone wanting simple budget control
+| Existing apps are too complex or require account connections
+|===
+
+=== Business Goals
+
+Transform the existing manual personal finance app into a modern, automated, and engaging financial planning solution that increases user value, reduces effort, and enhances long-term user retention.
+
+|===
+| Priority | Goal | Description
+
+| 1
+| Improve User Experience
+| Deliver a modern, intuitive app design that replaces the outdated interface
+
+| 2
+| Automate Data Entry
+| Integrate bank accounts via OpenBanking APIs (PSD2/XS2A), eliminating manual effort and reducing errors
+
+| 3
+| Provide Intelligent Insights
+| Offer optimized budgeting features supported by AI-driven analysis
+
+| 4
+| Boost Engagement
+| Introduce savings goals, gamification elements, and rewarding mechanisms to increase user retention
+|===
+
+=== Project Vision
+
+[quote]
+Deliver a modern, automated, and intelligent finance app that improves usability, removes manual effort through bank integration, and empowers users with smart insights and engaging savings tools.
+
+=== Requirements Overview
+
+==== Phase 1 - Core PWA (Current)
+
+Functional requirements for the initial PWA release:
+
+|===
+| ID | Requirement | Feature Status | Architecture Status
+
+| FR-001
+| Create, edit, delete income/expense transactions
+| Implemented
+| Refactor Pending
+
+| FR-002
+| Display transactions filtered by period (daily, monthly, yearly)
+| Implemented
+| Refactor Pending
+
+| FR-003
+| Set spending limits per category
+| Implemented
+| Refactor Pending
+
+| FR-004
+| Categorize transactions with predefined and custom categories
+| Implemented
+| Refactor Pending
+
+| FR-005
+| Create and apply transaction templates
+| Implemented
+| Refactor Pending
+
+| FR-006
+| View statistics with charts and visualizations
+| Implemented
+| Refactor Pending
+
+| FR-007
+| Support multiple accounts per user
+| Implemented
+| Refactor Pending
+
+| FR-008
+| Offline functionality with local data storage
+| Implemented
+| Refactor Pending
+
+| FR-009
+| Multi-language support (German, English)
+| Implemented
+| Refactor Pending
+
+| FR-010
+| PWA installable on mobile devices
+| Implemented
+| Refactor Pending
+|===
+
+NOTE: All Phase 1 features are *functionally complete* and working. However, the codebase requires *architectural refactoring* to align with the target Nx monorepo structure (`@budget/core` + `@budget/app`). See `REFACTOR_TICKETS.md` for detailed migration plan.
+
+==== Phase 2 - Advanced Features (Future)
+
+|===
+| ID | Requirement | Status
+
+| FR-011
+| PSD2/XS2A bank account integration
+| Planned
+
+| FR-012
+| Automated transaction categorization
+| Planned
+
+| FR-013
+| AI-driven financial insights and recommendations
+| Planned
+
+| FR-014
+| Gamification with badges and challenges
+| Planned
+
+| FR-015
+| Personal savings goals with progress tracking
+| Implemented (Basic)
+
+| FR-016
+| Cost-saving suggestions and analysis
+| Planned
+|===
+
+=== Quality Goals
+
+|===
+| Priority | Quality Goal | Description
+
+| 1
+| Usability
+| Simple, intuitive interface suitable for users with no financial expertise
+
+| 2
+| Privacy
+| All data stored locally on device, no mandatory cloud sync or account creation
+
+| 3
+| Performance
+| Fast, responsive app that works smoothly on mobile devices
+
+| 4
+| Offline Capability
+| Full functionality without internet connection
+
+| 5
+| Accessibility
+| Support for users with different accessibility needs
+|===
+
+=== Stakeholders
+
+|===
+| Role | Name/Organization | Expectations
+
+| Client
+| Stiftung Deutschland im Plus
+| Modern app that serves their mission of financial education
+
+| Development Partner
+| adorsys Cameroon
+| Deliver quality solution within budget and timeline
+
+| End Users
+| 36,000+ monthly active users
+| Improved user experience, easier financial tracking
+
+| Product Owner
+| Philipp Blomeyer
+| Successful modernization with advanced feature roadmap
+|===
